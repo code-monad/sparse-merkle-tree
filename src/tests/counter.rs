@@ -1,7 +1,7 @@
+use crate::branch::{BranchKey, BranchNode};
 use crate::default_store::DefaultStore;
 use crate::merge::MergeValue;
 use crate::traits::StoreWriteOps;
-use crate::tree::{BranchKey, BranchNode};
 use crate::H256;
 #[test]
 fn test_store_write_counter() {
