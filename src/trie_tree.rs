@@ -17,6 +17,7 @@ pub struct SparseMerkleTree<H, V, S> {
     store: S,
     root: H256,
     phantom: PhantomData<(H, V)>,
+    height: u8,
 }
 
 impl<H, V, S> SparseMerkleTree<H, V, S> {
@@ -26,6 +27,7 @@ impl<H, V, S> SparseMerkleTree<H, V, S> {
             root,
             store,
             phantom: PhantomData,
+            height: core::u8::MAX,
         }
     }
 
@@ -53,64 +55,16 @@ impl<H, V, S> SparseMerkleTree<H, V, S> {
     pub fn store_mut(&mut self) -> &mut S {
         &mut self.store
     }
+
+    /// Get Tree height
+    pub fn height(&self) -> &u8 {
+        &self.height
+    }
 }
 
-impl<H: Hasher + Default, V: Value, S: StoreReadOps<V> + StoreWriteOps<V>>
+impl<H: Hasher + Default, V: Value + PartialEq, S: StoreReadOps<V> + StoreWriteOps<V>>
     SparseMerkleTree<H, V, S>
 {
-    /// Update a leaf, return new merkle root
-    /// set to zero value to delete a key
-    pub fn update(&mut self, key: H256, value: V) -> Result<&H256> {
-        // compute and store new leaf
-        let node = MergeValue::from_h256(value.to_h256());
-        // notice when value is zero the leaf is deleted, so we do not need to store it
-        if !node.is_zero() {
-            self.store.insert_leaf(key, value)?;
-        } else {
-            self.store.remove_leaf(&key)?;
-        }
-
-        // recompute the tree from bottom to top
-        let mut current_key = key;
-        let mut current_node = node;
-        for height in 0..=core::u8::MAX {
-            let parent_key = current_key.parent_path(height);
-            let parent_branch_key = BranchKey::new(height, parent_key);
-            let (left, right) =
-                if let Some(parent_branch) = self.store.get_branch(&parent_branch_key)? {
-                    if current_key.is_right(height) {
-                        (parent_branch.left, current_node)
-                    } else {
-                        (current_node, parent_branch.right)
-                    }
-                } else if current_key.is_right(height) {
-                    (MergeValue::zero(), current_node)
-                } else {
-                    (current_node, MergeValue::zero())
-                };
-
-            if !left.is_zero() || !right.is_zero() {
-                // insert or update branch
-                self.store.insert_branch(
-                    parent_branch_key,
-                    BranchNode {
-                        left: left.clone(),
-                        right: right.clone(),
-                    },
-                )?;
-            } else {
-                // remove empty branch
-                self.store.remove_branch(&parent_branch_key)?;
-            }
-            // prepare for next round
-            current_key = parent_key;
-            current_node = merge::<H>(height, &parent_key, &left, &right);
-        }
-
-        self.root = current_node.hash::<H>();
-        Ok(&self.root)
-    }
-
     /// Update multiple leaves at once
     pub fn update_all(&mut self, mut leaves: Vec<(H256, V)>) -> Result<&H256> {
         // Dedup(only keep the last of each key) and sort leaves
@@ -118,6 +72,7 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V> + StoreWriteOps<V>>
         leaves.sort_by_key(|(a, _)| *a);
         leaves.dedup_by_key(|(a, _)| *a);
 
+        // Remove leaf if set to zero
         let mut nodes = leaves
             .into_iter()
             .map(|(k, v)| {
@@ -130,65 +85,7 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V> + StoreWriteOps<V>>
                 .map(|_| (k, value, 0))
             })
             .collect::<Result<VecDeque<(H256, MergeValue, u8)>>>()?;
-
-        while let Some((current_key, current_merge_value, height)) = nodes.pop_front() {
-            let parent_key = current_key.parent_path(height);
-            let parent_branch_key = BranchKey::new(height, parent_key);
-
-            // Test for neighbors
-            let mut right = None;
-            if !current_key.is_right(height) && !nodes.is_empty() {
-                let (neighbor_key, _, neighbor_height) = nodes.front().expect("nodes is not empty");
-                if neighbor_height.eq(&height) {
-                    let mut right_key = current_key;
-                    right_key.set_bit(height);
-                    if neighbor_key.eq(&right_key) {
-                        let (_, neighbor_value, _) = nodes.pop_front().expect("nodes is not empty");
-                        right = Some(neighbor_value);
-                    }
-                }
-            }
-
-            let (left, right) = if let Some(right_merge_value) = right {
-                (current_merge_value, right_merge_value)
-            } else {
-                // In case neighbor is not available, fetch from store
-                if let Some(parent_branch) = self.store.get_branch(&parent_branch_key)? {
-                    if current_key.is_right(height) {
-                        (parent_branch.left, current_merge_value)
-                    } else {
-                        (current_merge_value, parent_branch.right)
-                    }
-                } else if current_key.is_right(height) {
-                    (MergeValue::zero(), current_merge_value)
-                } else {
-                    (current_merge_value, MergeValue::zero())
-                }
-            };
-
-            if !left.is_zero() || !right.is_zero() {
-                self.store.insert_branch(
-                    parent_branch_key,
-                    BranchNode {
-                        left: left.clone(),
-                        right: right.clone(),
-                    },
-                )?;
-            } else {
-                self.store.remove_branch(&parent_branch_key)?;
-            }
-            if height == core::u8::MAX {
-                self.root = merge::<H>(height, &parent_key, &left, &right).hash::<H>();
-                break;
-            } else {
-                nodes.push_back((
-                    parent_key,
-                    merge::<H>(height, &parent_key, &left, &right),
-                    height + 1,
-                ));
-            }
-        }
-
+        while let Some((current_key, current_merge_value, height)) = nodes.pop_front() {}
         Ok(&self.root)
     }
 }
