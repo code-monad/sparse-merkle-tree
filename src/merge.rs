@@ -21,6 +21,10 @@ impl MergeValue {
         MergeValue::Value(v)
     }
 
+    pub fn trie_from_h256(v: H256) -> Self {
+        MergeValue::TrieValue(v)
+    }
+
     pub fn zero() -> Self {
         MergeValue::Value(H256::zero())
     }

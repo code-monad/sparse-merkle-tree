@@ -18,6 +18,7 @@ pub struct SparseMerkleTree<H, V, S> {
     root: H256,
     phantom: PhantomData<(H, V)>,
     height: u8,
+    past_roots: Vec<H256>,
 }
 
 impl<H, V, S> SparseMerkleTree<H, V, S> {
@@ -27,7 +28,8 @@ impl<H, V, S> SparseMerkleTree<H, V, S> {
             root,
             store,
             phantom: PhantomData,
-            height: core::u8::MAX,
+            height: 0,
+            past_roots: Vec::<H256>::new(),
         }
     }
 
@@ -56,9 +58,13 @@ impl<H, V, S> SparseMerkleTree<H, V, S> {
         &mut self.store
     }
 
-    /// Get Tree height
-    pub fn height(&self) -> &u8 {
-        &self.height
+    pub fn height(&self) -> u8 {
+        self.height
+    }
+
+    /// Get Past Roots
+    pub fn past_roots(&self) -> &Vec<H256> {
+        &self.past_roots
     }
 }
 
@@ -76,17 +82,72 @@ impl<H: Hasher + Default, V: Value + PartialEq, S: StoreReadOps<V> + StoreWriteO
         let mut nodes = leaves
             .into_iter()
             .map(|(k, v)| {
-                let value = MergeValue::from_h256(v.to_h256());
+                let value = MergeValue::trie_from_h256(v.to_h256());
                 if !value.is_zero() {
                     self.store.insert_leaf(k, v)
                 } else {
                     self.store.remove_leaf(&k)
                 }
-                .map(|_| (k, value, 0))
+                .map(|_| (k, value))
             })
-            .collect::<Result<VecDeque<(H256, MergeValue, u8)>>>()?;
-        while let Some((current_key, current_merge_value, height)) = nodes.pop_front() {}
-        Ok(&self.root)
+            .collect::<Result<VecDeque<(H256, MergeValue)>>>()?;
+
+        // build first branch if this is new tree
+        while let Some((current_key, current_merge_value)) = nodes.pop_front() {
+            let mut updated = false; // flag for if root is updated
+            let root_branch_key = BranchKey::new(self.height, self.root);
+
+            if let Some(root_branch) = self.store.get_branch(&root_branch_key)? {
+                let (mut left, mut right) = (root_branch.left, root_branch.right);
+                let mut height = self.height;
+                'walk: while !left.is_zero() && !right.is_zero() {
+                    // walk to the branch
+
+                    // this is a deletion
+                    if current_merge_value.is_zero() && left == current_merge_value {
+                        break 'walk;
+                    }
+
+                    match left {
+                        MergeValue::Value(value) => {
+                            // try right
+                            if let Some(next_branch) = self
+                                .store
+                                .get_branch(&BranchKey::new(height, right.hash::<H>()))?
+                            {
+                                left = next_branch.left;
+                                right = next_branch.right;
+                            } else { // no branch for right ?
+                            }
+                        }
+                        MergeValue::TrieValue(value) => { // left is an trie hash, try left first
+                        }
+                        _ => {}
+                    }
+                }
+            } else {
+                // empty branch, which means empty tree contains only root
+                if current_merge_value.is_zero() {
+                    continue; // we shouldn't remove from an empty tree
+                }
+                let lhs = current_merge_value;
+                let rhs = MergeValue::zero();
+
+                // we need to update roots everytime when tree is modified
+                self.root = merge::<H>(self.height, &self.root, &lhs, &rhs).hash::<H>();
+                updated = true;
+            }
+
+            if updated {
+                if let Some(last_root) = self.past_roots.last() {
+                    self.store
+                        .remove_branch(&BranchKey::new(self.height, *last_root))?;
+                }
+                self.past_roots.push(self.root);
+            }
+        }
+
+        return Ok(&self.root);
     }
 }
 

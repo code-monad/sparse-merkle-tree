@@ -72,14 +72,14 @@ pub mod merkle_proof;
 #[cfg(test)]
 mod tests;
 pub mod traits;
-pub mod tree;
-//pub mod trie_tree;
+//pub mod tree;
+pub mod trie_tree;
 
 pub use ckb_smt::{SMTBuilder, SMT};
 pub use h256::H256;
 pub use merkle_proof::{CompiledMerkleProof, MerkleProof};
-pub use tree::SparseMerkleTree;
-//pub use trie_tree::SparseMerkleTree;
+//pub use tree::SparseMerkleTree;
+pub use trie_tree::SparseMerkleTree;
 
 /// Expected path size: log2(256) * 2, used for hint vector capacity
 pub const EXPECTED_PATH_SIZE: usize = 16;
