@@ -71,6 +71,11 @@ impl<H, V, S> SparseMerkleTree<H, V, S> {
 impl<H: Hasher + Default, V: Value + PartialEq, S: StoreReadOps<V> + StoreWriteOps<V>>
     SparseMerkleTree<H, V, S>
 {
+    /// Update a leaf, return new merkle root
+    /// set to zero value to delete a key
+    pub fn update(&mut self, key: H256, value: V) -> Result<&H256> {
+        self.update_all([(key, value)].into())
+    }
     /// Update multiple leaves at once
     pub fn update_all(&mut self, mut leaves: Vec<(H256, V)>) -> Result<&H256> {
         // Dedup(only keep the last of each key) and sort leaves
@@ -96,27 +101,34 @@ impl<H: Hasher + Default, V: Value + PartialEq, S: StoreReadOps<V> + StoreWriteO
         while let Some((current_key, current_merge_value)) = nodes.pop_front() {
             let mut updated = false; // flag for if root is updated
             let root_branch_key = BranchKey::new(self.height, self.root);
-
+            let mut current_node = self.root;
             if let Some(root_branch) = self.store.get_branch(&root_branch_key)? {
                 let (mut left, mut right) = (root_branch.left, root_branch.right);
                 let mut height = self.height;
-                'walk: while !left.is_zero() && !right.is_zero() {
+                'walk: while !left.is_zero() {
                     // walk to the branch
+                    if height == 0 {
+                        // walked to bottom, but
+                    }
 
                     // this is a deletion
                     if current_merge_value.is_zero() && left == current_merge_value {
+                        self.store
+                            .remove_branch(&BranchKey::new(height, current_key))?;
                         break 'walk;
                     }
 
                     match left {
                         MergeValue::Value(value) => {
                             // try right
+                            current_node = right.hash::<H>();
                             if let Some(next_branch) = self
                                 .store
-                                .get_branch(&BranchKey::new(height, right.hash::<H>()))?
+                                .get_branch(&BranchKey::new(height, current_node))?
                             {
                                 left = next_branch.left;
                                 right = next_branch.right;
+                                height -= 1;
                             } else { // no branch for right ?
                             }
                         }
@@ -124,6 +136,15 @@ impl<H: Hasher + Default, V: Value + PartialEq, S: StoreReadOps<V> + StoreWriteO
                         }
                         _ => {}
                     }
+                }
+                if left.is_zero() {
+                    self.store.insert_branch(
+                        BranchKey::new(height, current_key),
+                        BranchNode {
+                            left: MergeValue::from_h256(current_key),
+                            right: right,
+                        },
+                    )?;
                 }
             } else {
                 // empty branch, which means empty tree contains only root
@@ -135,6 +156,14 @@ impl<H: Hasher + Default, V: Value + PartialEq, S: StoreReadOps<V> + StoreWriteO
 
                 // we need to update roots everytime when tree is modified
                 self.root = merge::<H>(self.height, &self.root, &lhs, &rhs).hash::<H>();
+                self.store.remove_branch(&root_branch_key)?;
+                self.store.insert_branch(
+                    BranchKey::new(self.height + 1, self.root),
+                    BranchNode {
+                        left: lhs,
+                        right: rhs,
+                    },
+                );
                 updated = true;
             }
 
