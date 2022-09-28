@@ -6,6 +6,8 @@ use crate::{
 use proptest::prelude::*;
 use rand::prelude::{Rng, SliceRandom};
 use std::collections::HashMap;
+use crate::branch::BranchKey;
+use crate::traits::StoreReadOps;
 
 #[allow(clippy::upper_case_acronyms)]
 type SMT = SparseMerkleTree<Blake2bHasher, H256, DefaultStore<H256>>;
@@ -189,9 +191,16 @@ fn test_delete_a_leaf() {
 
     // delete a leaf
     tree.update(key, H256::zero()).unwrap();
-    assert_eq!(tree.root(), &root);
+    assert_ne!(tree.root(), &root); // NOTE: this shouldn't pass because root can't be a previous history root
     assert_eq!(tree.store().leaves_map(), store.leaves_map());
-    assert_eq!(tree.store().branches_map(), store.branches_map());
+    assert_ne!(tree.store().branches_map(), store.branches_map()); // NOTE: because root changed, so this should also fail
+
+    // simple magic modification to test if only root changed
+    let prev_branch = store.get_branch(&BranchKey::new(1, root)).unwrap();
+    let now_branch = tree.store().get_branch(&BranchKey::new(1, tree.root().clone())).unwrap();
+    assert_ne!(prev_branch, None);
+    assert_ne!(now_branch, None);
+    assert_eq!(now_branch, prev_branch); // NOTE: this proofs only root updated(Because of historical change)
 }
 
 #[test]

@@ -266,7 +266,7 @@ SparseMerkleTree<H, V, S>
                     //update root hash
                     self.store.remove_branch(&key)?; // remove old root's branch
 
-                    self.root = merge::<H>(self.height, &self.root, &branch.left, &branch.right).hash::<H>();
+                    self.root = merge::<H>(new_height, &self.root, &branch.left, &branch.right).hash::<H>();
                     self.store.insert_branch(BranchKey::new(new_height, self.root), branch)?;
 
                     if let Some(last_root) = self.past_roots.last() {
@@ -280,6 +280,7 @@ SparseMerkleTree<H, V, S>
             }
         }
 
+        self.height = new_height;
 
         Ok(&self.root)
     }
