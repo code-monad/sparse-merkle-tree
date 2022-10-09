@@ -25,7 +25,7 @@ pub struct SparseMerkleTree<H, V, S> {
     past_roots: Vec<H256>,
 }
 
-impl<H, V, S> SparseMerkleTree<H, V, S> {
+impl<H, V, S: StoreReadOps<V>> SparseMerkleTree<H, V, S> {
     /// Build a merkle tree from root and store
     pub fn new(root: H256, store: S) -> SparseMerkleTree<H, V, S> {
         SparseMerkleTree {
@@ -37,6 +37,7 @@ impl<H, V, S> SparseMerkleTree<H, V, S> {
             past_roots: Vec::new(),
         }
     }
+
 
     /// Merkle root
     pub fn root(&self) -> &H256 {
@@ -118,7 +119,8 @@ SparseMerkleTree<H, V, S>
                     right: MergeValue::zero(),
                 }
             };
-            self.root = merge::<H>(new_height as u8, &self.root, &branch.left, &branch.right).hash::<H>();
+            self.store.remove_branch(&BranchKey::new(self.height, self.root))?;
+            self.root = merge::<H>(new_height as u8, &H256::zero(), &branch.left, &branch.right).hash::<H>();
             self.store.insert_branch(BranchKey::new(new_height, self.root), branch.clone())?;
             self.height = new_height;
         } else {
@@ -142,9 +144,9 @@ SparseMerkleTree<H, V, S>
 
                         if parent_key.height == self.height && !next_step.is_zero() {
                             next_step = if key.is_right(parent_height) {
-                                left.clone()
-                            }  else {
                                 right.clone()
+                            }  else {
+                                left.clone()
                             };
                         }
 
@@ -222,7 +224,7 @@ SparseMerkleTree<H, V, S>
                 if let Some((parent_key, parent_branch)) = walk_path.pop() { // stil have stacked path
                     if !branch.left.is_zero() && !branch.right.is_zero() {
                         let new_node_height = max(0, (key.height as i8 + height_changed) as u8);
-                        let new_hash = merge::<H>(new_node_height, &key.node_key, &branch.left, &branch.right);
+                        let new_hash = merge::<H>(new_node_height, &parent_key.node_key, &branch.left, &branch.right);
                         self.store.remove_branch(&key)?;
                         self.store.insert_branch(BranchKey::new(new_node_height, new_hash.hash::<H>()), branch)?;
                         if parent_key.node_key == self.root { // this is root, update it
@@ -266,7 +268,7 @@ SparseMerkleTree<H, V, S>
                     //update root hash
                     self.store.remove_branch(&key)?; // remove old root's branch
 
-                    self.root = merge::<H>(new_height, &self.root, &branch.left, &branch.right).hash::<H>();
+                    self.root = merge::<H>(new_height, &H256::zero(), &branch.left, &branch.right).hash::<H>();
                     self.store.insert_branch(BranchKey::new(new_height, self.root), branch)?;
 
                     if let Some(last_root) = self.past_roots.last() {
