@@ -91,8 +91,7 @@ SparseMerkleTree<H, V, S>
     /// set to zero value to delete a key
     pub fn update(&mut self, key: H256, value: V) -> Result<&H256> {
         // compute and store new leaf
-        let value_hash = value.to_h256();
-        let node = MergeValue::TrieValue(key, value_hash);
+        let node = MergeValue::Value(value.to_h256());
         // notice when value is zero the leaf is deleted, so we do not need to store it
         if !node.is_zero() {
             self.store.insert_leaf(key, value)?;
@@ -106,8 +105,8 @@ SparseMerkleTree<H, V, S>
         // the tree grows or decrements, root hash must be updated
         let height_changed: i8 = new_height as i8 - self.height as i8;
 
-        // check if a empty root
-        if self.root.is_zero() {
+
+        if self.root.is_zero() { // empty tree now
             let branch = if key.is_right((0 + height_changed) as u8) {
                 BranchNode {
                     left: MergeValue::zero(),
@@ -119,6 +118,7 @@ SparseMerkleTree<H, V, S>
                     right: MergeValue::zero(),
                 }
             };
+
             self.store.remove_branch(&BranchKey::new(self.height, self.root))?;
             self.root = merge::<H>(new_height as u8, &H256::zero(), &branch.left, &branch.right).hash::<H>();
             self.store.insert_branch(BranchKey::new(new_height, self.root), branch.clone())?;
@@ -126,160 +126,44 @@ SparseMerkleTree<H, V, S>
         } else {
             // walk through the tree from top to bottom
             let mut parent_key = BranchKey::new(self.height, self.root);
-            let mut walk_path = Vec::<(BranchKey, BranchNode)>::new(); // recording the walk path for out recursion update hashes.
-
-
+            let mut walk_path = Vec::<BranchKey>::new(); // recording the walk path for out recursion update hashes.
             while !parent_key.node_key.is_zero() {
                 if let Some(parent_branch) = self.store.get_branch(&parent_key)? {
-                    let new_parent_height = (parent_key.height as i8 + height_changed) as u8;
-                    walk_path.push((parent_key.clone(), parent_branch.clone()));
-                    let parent_height = (parent_key.height as i8 + height_changed) as u8;
+                    walk_path.push(parent_key.clone());
                     let (left, right) = (parent_branch.left, parent_branch.right);
-                    if parent_key.height > 0 {
-                        let mut next_step = if key.is_right(parent_height) {
-                            right.clone()
-                        } else {
-                            left.clone()
-                        };
-
-                        if parent_key.height == self.height && !next_step.is_zero() {
-                            next_step = if key.is_right(parent_height) {
-                                right.clone()
-                            }  else {
-                                left.clone()
+                    if node.is_zero(){ // deletion
+                        if left.hash() == key {
+                            self.store.insert_branch(parent_key.clone(), BranchNode{
+                                left: MergeValue::zero(),
+                                right,
+                            })?;
+                        } else if right.hash() == key {
+                            self.store.insert_branch(parent_key.clone(), BranchNode{
+                                left,
+                                right: MergeValue::zero(),
+                            })?;
+                        } else { // find next
+                            let mut target = match left {
+                                MergeValue::TrieValue(k,v) => { Some(BranchKey::new(parent_key.height - 1, k))},
+                                _ => { None },
                             };
-                        }
-
-                        if next_step.is_zero() { // valid position, build branch to connect here
-                            let new_branch = if key.is_right(parent_height) {
-                                BranchNode {
-                                    left,
-                                    right: node.clone(),
-                                }
-                            } else {
-                                BranchNode {
-                                    left: node.clone(),
-                                    right,
-                                }
-                            };
-                            self.store.insert_branch(parent_key, new_branch)?;
-                            break;
-                        } else {
-                            if let MergeValue::TrieValue(k,v) = next_step {
-                                if k == key {
-                                    let new_branch = if key.is_right(parent_height) {
-                                        BranchNode {
-                                            left,
-                                            right: node.clone(),
-                                        }
-                                    } else {
-                                        BranchNode {
-                                            left: node.clone(),
-                                            right,
-                                        }
-                                    };
-                                    let insert_height = if parent_height == 0 {
-                                        0
-                                    } else {
-                                        parent_height - 1
-                                    };
-                                    self.store.insert_branch(BranchKey::new(insert_height, k), new_branch.clone())?;
-
-                                    walk_path.push((parent_key.clone(), new_branch));
-                                } else {
-                                    if key.is_right(parent_key.height) {
-                                        parent_key = BranchKey::new(parent_key.height - 1, right.hash::<H>());
-                                    } else {
-                                        parent_key = BranchKey::new(parent_key.height - 1, left.hash::<H>());
-                                    }
-                                }
-                            } else {
-
+                            if target.is_none() { // try right
+                                target = match right {
+                                    MergeValue::TrieValue(k,v) => { Some(BranchKey::new(parent_key.height - 1, k))},
+                                    _ => { None },
+                                };
                             }
-                        }
-                    } else { // reached bottom subtree
-                        break;
-                    }
-                } else { // no branch recorded before, maybe is a value leaf
 
-                    let branch = if key.is_right((parent_key.height as i8 + height_changed) as u8) {
-                        BranchNode {
-                            left: MergeValue::trie_from_h256(key, value_hash),
-                            right: node,
+                            parent_key = target.unwrap();
                         }
-                    } else {
-                        BranchNode {
-                            left: node,
-                            right: MergeValue::trie_from_h256(key, value_hash),
-                        }
-                    };
-                    self.store.insert_branch(parent_key.clone(), branch.clone())?; // update this node inplace
-                    walk_path.push((parent_key, branch));
-                    break;
+                    } else { // insertion
+
+                    }
+                } else { // no branch recorded in this node's subtree, maybe a leaf? => create new merge node with  [MergeHash, [THIS_LEAF, INSERTED_LEAF]]
+
                 }
             }
 
-            // update the tree's hash
-            while let Some((key, branch)) = walk_path.pop() {
-                if let Some((parent_key, parent_branch)) = walk_path.pop() { // stil have stacked path
-                    if !branch.left.is_zero() && !branch.right.is_zero() {
-                        let new_node_height = max(0, (key.height as i8 + height_changed) as u8);
-                        let new_hash = merge::<H>(new_node_height, &parent_key.node_key, &branch.left, &branch.right);
-                        self.store.remove_branch(&key)?;
-                        self.store.insert_branch(BranchKey::new(new_node_height, new_hash.hash::<H>()), branch)?;
-                        if parent_key.node_key == self.root { // this is root, update it
-                            self.root = new_hash.hash::<H>();
-                            self.past_roots.push(self.root);
-                        }
-                    } else if branch.is_empty() { // this node is empty now, set parent as an empty node
-                        self.store.remove_branch(&parent_key)?;
-                        walk_path.push((parent_key, BranchNode::new_empty()));
-                    } else { // there is a value remained, move it up
-                        let value_remain = if branch.left.is_zero() {
-                            branch.right
-                        } else {
-                            branch.left
-                        };
-
-                        let (parent_left, parent_right) = (parent_branch.left, parent_branch.right);
-
-                        // insert to it's parent nodes' sibling
-                        let parent_branch = if parent_left.is_zero() {
-                            BranchNode {
-                                left: value_remain,
-                                right: parent_right,
-                            }
-                        } else {
-                            BranchNode {
-                                left: parent_left,
-                                right: value_remain,
-                            }
-                        };
-
-                        // calculate new parent hash cuz it moved up
-                        let parent_hash = merge::<H>(parent_key.height, &parent_key.node_key, &parent_branch.left, &parent_branch.right).hash::<H>();
-
-                        self.store.remove_branch(&parent_key)?; // remove old branch
-
-                        self.store.insert_branch(BranchKey::new(parent_key.height, parent_hash), parent_branch)?;
-                    }
-                } else { // this is root now, no need to update recursively
-
-                    //update root hash
-                    self.store.remove_branch(&key)?; // remove old root's branch
-
-                    self.root = merge::<H>(new_height, &H256::zero(), &branch.left, &branch.right).hash::<H>();
-                    self.store.insert_branch(BranchKey::new(new_height, self.root), branch)?;
-
-                    if let Some(last_root) = self.past_roots.last() {
-                        if last_root != &self.root {
-                            self.past_roots.push(self.root); // recording new root
-                        }
-                    } else {
-                        self.past_roots.push(self.root);
-                    }
-                }
-            }
         }
 
         self.height = new_height;

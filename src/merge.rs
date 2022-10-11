@@ -57,10 +57,10 @@ impl MergeValue {
                 hasher.write_byte(*zero_count);
                 hasher.finish()
             }
-            MergeValue::TrieValue(k,v) => {
+            MergeValue::TrieValue(_,v) => {
                 let mut hasher = H::default();
                 hasher.write_byte(MERGE_TRIE);
-                hasher.write_h256(k);
+                //hasher.write_h256(k);
                 hasher.write_h256(v);
                 hasher.finish()
             }
@@ -142,7 +142,7 @@ fn merge_with_zero<H: Hasher + Default>(
                 zero_count: zero_count.wrapping_add(1),
             }
         }
-        MergeValue::TrieValue(k,v) => {
+        MergeValue::TrieValue(_,v) => {
             let mut zero_bits = H256::zero();
             if set_bit {
                 zero_bits.set_bit(height);
