@@ -132,35 +132,55 @@ SparseMerkleTree<H, V, S>
                     walk_path.push(parent_key.clone());
                     let (left, right) = (parent_branch.left, parent_branch.right);
                     if node.is_zero(){ // deletion
-                        if left.hash() == key {
+                        if left.hash::<H>() == key {
                             self.store.insert_branch(parent_key.clone(), BranchNode{
                                 left: MergeValue::zero(),
                                 right,
                             })?;
-                        } else if right.hash() == key {
+                        } else if right.hash::<H>() == key {
                             self.store.insert_branch(parent_key.clone(), BranchNode{
                                 left,
                                 right: MergeValue::zero(),
                             })?;
                         } else { // find next
                             let mut target = match left {
-                                MergeValue::TrieValue(k,v) => { Some(BranchKey::new(parent_key.height - 1, k))},
+                                MergeValue::TrieValue(k,_) => { Some(BranchKey::new(parent_key.height - 1, k))},
                                 _ => { None },
                             };
                             if target.is_none() { // try right
                                 target = match right {
-                                    MergeValue::TrieValue(k,v) => { Some(BranchKey::new(parent_key.height - 1, k))},
+                                    MergeValue::TrieValue(k,_) => { Some(BranchKey::new(parent_key.height - 1, k))},
                                     _ => { None },
                                 };
                             }
+                            if let Some(target) = target {
+                                parent_key =  target;
+                            }
 
-                            parent_key = target.unwrap();
                         }
                     } else { // insertion
 
                     }
                 } else { // no branch recorded in this node's subtree, maybe a leaf? => create new merge node with  [MergeHash, [THIS_LEAF, INSERTED_LEAF]]
+                    if let Some(prev_parent)= walk_path.pop(){
+                        let branch = if key.is_right(prev_parent.height - 1) {
+                            BranchNode{
+                                left:  MergeValue::Value(parent_key.node_key),
+                                right: MergeValue::Value(key),
+                            }
+                        } else {
+                            BranchNode{
+                                left: MergeValue::Value(key),
+                                right:  MergeValue::Value(parent_key.node_key),
 
+                            }
+                        };
+                        let branch_key = merge::<H>(parent_key.height, &prev_parent.node_key, &branch.left, &branch.right );
+                        let branch_key = BranchKey::new(parent_key.height, branch_key.hash::<H>());
+                        self.store.insert_branch(branch_key, branch)?;
+                    } else { // this is root
+
+                    }
                 }
             }
 
