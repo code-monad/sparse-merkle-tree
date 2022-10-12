@@ -1,3 +1,4 @@
+use std::any::Any;
 use crate::h256::H256;
 use crate::traits::Hasher;
 
@@ -106,6 +107,23 @@ pub fn merge<H: Hasher + Default>(
     hasher.write_h256(&lhs.hash::<H>());
     hasher.write_h256(&rhs.hash::<H>());
     MergeValue::Value(hasher.finish())
+}
+
+pub fn merge_trie<H: Hasher + Default> (height: u8,
+                                          node_key: &H256,
+                                          lhs: &MergeValue,
+                                          rhs: &MergeValue,) -> MergeValue {
+
+    let mut hasher = H::default();
+    if lhs.is_zero() && rhs.is_zero() {
+        return MergeValue::zero();
+    }
+    hasher.write_byte(MERGE_TRIE);
+    hasher.write_byte(height);
+    hasher.write_h256(node_key);
+    hasher.write_h256(&lhs.hash::<H>());
+    hasher.write_h256(&rhs.hash::<H>());
+    MergeValue::TrieValue(node_key.clone(), hasher.finish())
 }
 
 fn merge_with_zero<H: Hasher + Default>(

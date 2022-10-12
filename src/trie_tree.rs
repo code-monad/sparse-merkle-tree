@@ -2,7 +2,7 @@ use crate::{
     branch::{BranchKey, BranchNode},
     collections::VecDeque,
     error::{Error, Result},
-    merge::{merge, MergeValue},
+    merge::{merge, MergeValue, merge_trie},
     merkle_proof::MerkleProof,
     traits::{Hasher, StoreReadOps, StoreWriteOps, Value},
     vec::Vec,
@@ -12,6 +12,7 @@ use crate::{
 use core::marker::PhantomData;
 use std::borrow::Borrow;
 use std::cmp::max;
+use std::hash::Hash;
 
 
 /// Sparse merkle tree
@@ -175,9 +176,26 @@ SparseMerkleTree<H, V, S>
 
                             }
                         };
-                        let branch_key = merge::<H>(parent_key.height, &prev_parent.node_key, &branch.left, &branch.right );
-                        let branch_key = BranchKey::new(parent_key.height, branch_key.hash::<H>());
+                        let branch_hash = merge_trie::<H>(parent_key.height, &prev_parent.node_key, &branch.left, &branch.right );
+                        let branch_key = BranchKey::new(parent_key.height, branch_hash.hash::<H>());
                         self.store.insert_branch(branch_key, branch)?;
+
+
+                        // we need to update prev_parent
+                        if let Some(prev_branch) = self.store.get_branch(&prev_parent)? {
+                            let updated = if prev_branch.left.hash::<H>() == parent_key.node_key {
+                                BranchNode{
+                                    left: branch_hash,
+                                    right: prev_branch.right,
+                                }
+                            } else {
+                                BranchNode{
+                                    left: prev_branch.left,
+                                    right: branch_hash,
+                                }
+                            };
+                            self.store.insert_branch(prev_parent, updated)?;
+                        }
                     } else { // this is root
 
                     }
