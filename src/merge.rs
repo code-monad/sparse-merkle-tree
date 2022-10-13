@@ -67,6 +67,16 @@ impl MergeValue {
             }
         }
     }
+
+    /// helper function for TrieValue to get key, simplify code
+    pub fn key(&self) -> H256 {
+        match self {
+            MergeValue::TrieValue(k,_) => *k,
+            MergeValue::Value(v) => *v,
+            _ => H256::zero(),
+
+        }
+    }
 }
 
 /// Hash base node into a H256

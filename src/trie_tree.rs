@@ -1,19 +1,15 @@
 use crate::{
-    branch::{BranchKey, BranchNode},
+    branch::*,
     collections::VecDeque,
     error::{Error, Result},
-    merge::{merge, MergeValue, merge_trie},
+    merge::{merge, merge_trie, MergeValue},
     merkle_proof::MerkleProof,
     traits::{Hasher, StoreReadOps, StoreWriteOps, Value},
     vec::Vec,
     H256, MAX_STACK_SIZE,
 };
-
+use core::cmp::Ordering;
 use core::marker::PhantomData;
-use std::borrow::Borrow;
-use std::cmp::max;
-use std::hash::Hash;
-
 
 /// Sparse merkle tree
 #[derive(Default, Debug)]
@@ -92,7 +88,7 @@ SparseMerkleTree<H, V, S>
     /// set to zero value to delete a key
     pub fn update(&mut self, key: H256, value: V) -> Result<&H256> {
         // compute and store new leaf
-        let node = MergeValue::Value(value.to_h256());
+        let node = MergeValue::trie_from_h256(key, value.to_h256());
         // notice when value is zero the leaf is deleted, so we do not need to store it
         if !node.is_zero() {
             self.store.insert_leaf(key, value)?;
@@ -100,114 +96,58 @@ SparseMerkleTree<H, V, S>
             self.store.remove_leaf(&key)?;
         }
 
-        let new_height = calculate_smt_height(self.store.get_leaves_len() as u8);
-
-
-        // the tree grows or decrements, root hash must be updated
-        let height_changed: i8 = new_height as i8 - self.height as i8;
-
-
-        if self.root.is_zero() { // empty tree now
-            let branch = if key.is_right((0 + height_changed) as u8) {
-                BranchNode {
-                    left: MergeValue::zero(),
-                    right: node,
-                }
+        if self.root.is_zero() && !node.is_zero() { // empty root, build branch for root and update it
+            let (left, right) = if key.is_right(0) {
+                (MergeValue::zero(),node)
             } else {
-                BranchNode {
-                    left: node,
-                    right: MergeValue::zero(),
-                }
+                (MergeValue::zero(),node)
             };
-
-            self.store.remove_branch(&BranchKey::new(self.height, self.root))?;
-            self.root = merge::<H>(new_height as u8, &H256::zero(), &branch.left, &branch.right).hash::<H>();
-            self.store.insert_branch(BranchKey::new(new_height, self.root), branch.clone())?;
-            self.height = new_height;
+            // update root hash immediately
+            self.height = 1;
+            self.root = merge_trie::<H>(self.height, &H256::zero(), &left, &right).hash::<H>();
+            let branch = BranchNode {left, right};
+            self.store.insert_branch(BranchKey::new(self.height, self.root), branch)?; // insert the branch
         } else {
-            // walk through the tree from top to bottom
-            let mut parent_key = BranchKey::new(self.height, self.root);
-            let mut walk_path = Vec::<BranchKey>::new(); // recording the walk path for out recursion update hashes.
-            while !parent_key.node_key.is_zero() {
-                if let Some(parent_branch) = self.store.get_branch(&parent_key)? {
-                    walk_path.push(parent_key.clone());
-                    let (left, right) = (parent_branch.left, parent_branch.right);
-                    if node.is_zero(){ // deletion
-                        if left.hash::<H>() == key {
-                            self.store.insert_branch(parent_key.clone(), BranchNode{
-                                left: MergeValue::zero(),
-                                right,
-                            })?;
-                        } else if right.hash::<H>() == key {
-                            self.store.insert_branch(parent_key.clone(), BranchNode{
-                                left,
-                                right: MergeValue::zero(),
-                            })?;
-                        } else { // find next
-                            let mut target = match left {
-                                MergeValue::TrieValue(k,_) => { Some(BranchKey::new(parent_key.height - 1, k))},
-                                _ => { None },
-                            };
-                            if target.is_none() { // try right
-                                target = match right {
-                                    MergeValue::TrieValue(k,_) => { Some(BranchKey::new(parent_key.height - 1, k))},
-                                    _ => { None },
-                                };
-                            }
-                            if let Some(target) = target {
-                                parent_key =  target;
-                            }
 
-                        }
-                    } else { // insertion
+            if let Some(result_key) = self.update_node(key, node, self.height, MergeValue::trie_from_h256(self.root, self.root), &BranchKey::new(0, H256::zero()))? {
 
-                    }
-                } else { // no branch recorded in this node's subtree, maybe a leaf? => create new merge node with  [MergeHash, [THIS_LEAF, INSERTED_LEAF]]
-                    if let Some(prev_parent)= walk_path.pop(){
-                        let branch = if key.is_right(prev_parent.height - 1) {
-                            BranchNode{
-                                left:  MergeValue::Value(parent_key.node_key),
-                                right: MergeValue::Value(key),
-                            }
-                        } else {
-                            BranchNode{
-                                left: MergeValue::Value(key),
-                                right:  MergeValue::Value(parent_key.node_key),
+            } else { // why?
 
-                            }
-                        };
-                        let branch_hash = merge_trie::<H>(parent_key.height, &prev_parent.node_key, &branch.left, &branch.right );
-                        let branch_key = BranchKey::new(parent_key.height, branch_hash.hash::<H>());
-                        self.store.insert_branch(branch_key, branch)?;
-
-
-                        // we need to update prev_parent
-                        if let Some(prev_branch) = self.store.get_branch(&prev_parent)? {
-                            let updated = if prev_branch.left.hash::<H>() == parent_key.node_key {
-                                BranchNode{
-                                    left: branch_hash,
-                                    right: prev_branch.right,
-                                }
-                            } else {
-                                BranchNode{
-                                    left: prev_branch.left,
-                                    right: branch_hash,
-                                }
-                            };
-                            self.store.insert_branch(prev_parent, updated)?;
-                        }
-                    } else { // this is root
-
-                    }
-                }
             }
+
 
         }
 
-        self.height = new_height;
-
         Ok(&self.root)
     }
+
+    /// Walk-through recurse fn
+    fn update_node(&mut self, key: H256, node:MergeValue, height:u8, current: MergeValue, parent_branch: &BranchKey) -> Result<Option<BranchKey>> {
+        let current_key = BranchKey::new(height, current.key());
+        if let Some(parent_branch) = self.store.get_branch(&current_key)?{
+            let (left,right) = (parent_branch.left, parent_branch.right);
+
+
+            return Ok(None);
+        } else { // no branch before, add a new merge node, [MERGE_VALUE, (current, new)]
+            let (left,right) = if key.is_right(height) {
+                (current, node)
+            } else {
+                (node, current)
+            };
+            let new_merge = merge_trie::<H>(height, &parent_branch.node_key, &left, &right);
+
+            // insert new branch
+            let new_key = BranchKey::new(height, new_merge.hash::<H>());
+            self.store.insert_branch(new_key.clone(), BranchNode{
+                left,
+                right,
+            })?;
+            return Ok(Some(new_key));
+        }
+    }
+
+
     /// Update multiple leaves at once
     pub fn update_all(&mut self, mut leaves: Vec<(H256, V)>) -> Result<&H256> {
         // Dedup(only keep the last of each key) and sort leaves
