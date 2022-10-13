@@ -104,7 +104,7 @@ impl MerkleProof {
                                 buffer.extend_from_slice(zero_bits.as_slice());
                                 (Some(0x51), Some(buffer))
                             }
-                            MergeValue::TrieValue(k, v) => (Some(0x52), Some(v.as_slice().to_vec())),
+                            MergeValue::TrieValue(_, v) => (Some(0x52), Some(v.as_slice().to_vec())),
                         }
                     } else {
                         zero_count += 1;

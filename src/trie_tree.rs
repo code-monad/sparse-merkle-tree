@@ -10,6 +10,7 @@ use crate::{
 };
 use core::cmp::Ordering;
 use core::marker::PhantomData;
+use std::borrow::Borrow;
 
 /// Sparse merkle tree
 #[derive(Default, Debug)]
@@ -104,12 +105,15 @@ SparseMerkleTree<H, V, S>
             };
             // update root hash immediately
             self.height = 1;
-            self.root = merge_trie::<H>(self.height, &H256::zero(), &left, &right).hash::<H>();
+            self.root = merge::<H>(self.height, &H256::zero(), &left, &right).hash::<H>();
             let branch = BranchNode {left, right};
             self.store.insert_branch(BranchKey::new(self.height, self.root), branch)?; // insert the branch
         } else {
 
-            if let Some(result_key) = self.update_node(key, node, self.height, MergeValue::trie_from_h256(self.root, self.root), &BranchKey::new(0, H256::zero()))? {
+            let height = calculate_smt_height(self.store.get_leaves_len() as u8);
+            if let (left, right) = self.update_node(key, node, self.height, MergeValue::trie_from_h256(self.root, self.root), &BranchKey::new(0, H256::zero()))? {
+                // update root hash immediately
+                self.root = merge::<H>(self.height, &H256::zero(), &left, &right).hash::<H>();
 
             } else { // why?
 
@@ -122,30 +126,59 @@ SparseMerkleTree<H, V, S>
     }
 
     /// Walk-through recurse fn
-    fn update_node(&mut self, key: H256, node:MergeValue, height:u8, current: MergeValue, parent_branch: &BranchKey) -> Result<Option<BranchKey>> {
+    fn update_node(&mut self, key: H256, node:MergeValue, height:u8, current: MergeValue, parent_key: &BranchKey) -> Result<(MergeValue, MergeValue)> {
         let current_key = BranchKey::new(height, current.key());
         if let Some(parent_branch) = self.store.get_branch(&current_key)?{
             let (left,right) = (parent_branch.left, parent_branch.right);
+            let (target, another) = if key.is_right(height) {
+                (left,right)
+            } else {
+                (right, left)
+            };
 
+            if target.is_zero() { // insert inplace
+                let new_branch = if key.is_right(height) {
+                    BranchNode {
+                        left: another,
+                        right: node,
+                    }
+                } else {
+                    BranchNode {
+                        left: node,
+                        right: another
+                    }
+                };
+                let new_branch_key = BranchKey::new(height, current.key());
+                let new_hash = merge::<H>(height, &parent_key.node_key, &new_branch.left, &new_branch.right);
+                let new_merge_value = MergeValue::trie_from_h256(current.key(), new_hash.hash::<H>());
+                let result = (new_branch.left.clone(), new_branch.right.clone());
+                self.store.insert_branch(new_branch_key, new_branch)?;
+                Ok(result)
+            } else {
+                // walk down the tree
+                let (left,right) = self.update_node(key, node, height -1 , target, &BranchKey::new(height - 1, current.key()))?;
 
-            return Ok(None);
+                Ok((left, right))
+            }
         } else { // no branch before, add a new merge node, [MERGE_VALUE, (current, new)]
             let (left,right) = if key.is_right(height) {
                 (current, node)
             } else {
                 (node, current)
             };
-            let new_merge = merge_trie::<H>(height, &parent_branch.node_key, &left, &right);
+            let new_merge = merge::<H>(height, &parent_key.node_key, &left, &right);
+
 
             // insert new branch
             let new_key = BranchKey::new(height, new_merge.hash::<H>());
             self.store.insert_branch(new_key.clone(), BranchNode{
-                left,
-                right,
+                left:left.clone(),
+                right: right.clone(),
             })?;
-            return Ok(Some(new_key));
+            Ok((left, right))
         }
     }
+
 
 
     /// Update multiple leaves at once
