@@ -59,11 +59,16 @@ impl MergeValue {
                 hasher.finish()
             }
             MergeValue::TrieValue(_,v) => {
-                let mut hasher = H::default();
-                hasher.write_byte(MERGE_TRIE);
-                //hasher.write_h256(k);
-                hasher.write_h256(v);
-                hasher.finish()
+                if v.is_zero() {
+                    H256::zero()
+                } else {
+
+                    let mut hasher = H::default();
+                    hasher.write_byte(MERGE_TRIE);
+                    //hasher.write_h256(k);
+                    hasher.write_h256(v);
+                    hasher.finish()
+                }
             }
         }
     }

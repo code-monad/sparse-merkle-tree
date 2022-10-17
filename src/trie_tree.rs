@@ -1,16 +1,16 @@
 use crate::{
     branch::*,
-    collections::VecDeque,
     error::{Error, Result},
     merge::{merge, merge_trie, MergeValue},
     merkle_proof::MerkleProof,
     traits::{Hasher, StoreReadOps, StoreWriteOps, Value},
     vec::Vec,
     H256, MAX_STACK_SIZE,
+    collections::BTreeMap,
 };
-use core::cmp::Ordering;
 use core::marker::PhantomData;
-use std::borrow::Borrow;
+
+
 
 /// Sparse merkle tree
 #[derive(Default, Debug)]
@@ -19,8 +19,7 @@ pub struct SparseMerkleTree<H, V, S> {
     root: H256,
     phantom: PhantomData<(H, V)>,
     height: u8,
-    highest: Option<H256>,
-    past_roots: Vec<H256>,
+    leaves_cnt: BTreeMap<u8,usize>,
 }
 
 impl<H, V, S: StoreReadOps<V>> SparseMerkleTree<H, V, S> {
@@ -31,8 +30,7 @@ impl<H, V, S: StoreReadOps<V>> SparseMerkleTree<H, V, S> {
             store,
             phantom: PhantomData,
             height: 0,
-            highest: None,
-            past_roots: Vec::new(),
+            leaves_cnt: BTreeMap::<u8,usize>::new(),
         }
     }
 
@@ -66,21 +64,8 @@ impl<H, V, S: StoreReadOps<V>> SparseMerkleTree<H, V, S> {
         self.height
     }
 
-    /// Get Past Roots
-    pub fn past_roots(&self) -> &Vec<H256> {
-        &self.past_roots
-    }
 }
 
-/// A tree in N level can contain max of (2^N + 1) leaves
-/// So the inverse calculation for tree have M leaves, the level is: ⌊log2(M-1)⌋
-pub fn calculate_smt_height(leaves_count: u8) -> u8 {
-    if leaves_count >= 1 {
-        ((leaves_count - 1) as f64).log2().ceil() as u8 + 1
-    } else {
-        0
-    }
-}
 
 impl<H: Hasher + Default, V: Value + PartialEq, S: StoreReadOps<V> + StoreWriteOps<V>>
 SparseMerkleTree<H, V, S>
@@ -106,6 +91,7 @@ SparseMerkleTree<H, V, S>
             // update root hash immediately
             self.height = 1;
             self.root = merge_trie::<H>(self.height, &H256::zero(), &left, &right).hash::<H>();
+
             let branch = BranchNode { left, right };
             self.store.insert_branch(BranchKey::new(self.height, H256::zero()), branch)?; // insert the branch
         } else {
@@ -125,6 +111,7 @@ SparseMerkleTree<H, V, S>
     fn insert_node(&mut self, key: H256, node: MergeValue, distance: u8, current: MergeValue, parent_key: &BranchKey) -> Result<H256> {
         let mut height = self.height - distance; // transform height
         let current_key = BranchKey::new(height, current.key());
+
         if let Some(parent_branch) = self.store.get_branch(&current_key)? {
             let (left, right) = (parent_branch.left, parent_branch.right);
             let (target, another) = if key.is_right(distance) {
@@ -149,6 +136,15 @@ SparseMerkleTree<H, V, S>
                 let new_hash = merge::<H>(height, &parent_key.node_key, &new_branch.left, &new_branch.right);
                 let new_merge_value = MergeValue::trie_from_h256(current.key(), new_hash.hash::<H>());
                 self.store.insert_branch(new_branch_key, new_branch)?;
+
+                // update current height count
+                let current_cnt = if self.leaves_cnt.contains_key(&height) {
+                    self.leaves_cnt[&height]
+                } else {
+                    0
+                };
+
+                self.leaves_cnt.insert(height,current_cnt + 1);
 
                 // update parent_branch because this current has updated
                 if let Some(parent_branch) = self.store.get_branch(parent_key)? { // when current is root, parent_key is ZERO so this won't match
@@ -179,6 +175,15 @@ SparseMerkleTree<H, V, S>
                 self.height = distance + 1;
                 height += 1;
             }
+
+            // update leaves count
+            let current_cnt = if self.leaves_cnt.contains_key(&height) {
+                self.leaves_cnt[&height]
+            } else {
+                0
+            };
+
+            self.leaves_cnt.insert(height,1);
             let new_merge = merge_trie::<H>(height, &parent_key.node_key, &left, &right);
 
             // insert new branch
@@ -206,13 +211,38 @@ SparseMerkleTree<H, V, S>
                 } else {
                     &left
                 };
+                let current_cnt = if self.leaves_cnt.contains_key(&height) {
+                    self.leaves_cnt[&height]
+                } else {
+                    1
+                };
+
+                // decreasing
+                self.leaves_cnt.insert(height,current_cnt - 1);
 
                 // delete empty branch
                 if remained.is_zero() {
                     self.store.remove_branch(&current_key)?;
                 } else { // move neighbor up
                     self.store.remove_branch(&current_key)?;
+
+
                     if let Some(parent_branch) = self.store.get_branch(&parent_key)? {
+                        let current_cnt = if self.leaves_cnt.contains_key(&height) {
+                            self.leaves_cnt[&height]
+                        } else {
+                            1
+                        };
+                        // decreasing
+                        self.leaves_cnt.insert(height,current_cnt - 1);
+                        // increasing parent
+                        let parent_cnt = if self.leaves_cnt.contains_key(&(height + 1)) {
+                            self.leaves_cnt[&(height+1)]
+                        } else {
+                            0
+                        };
+                        self.leaves_cnt.insert(height+1, parent_cnt + 1);
+
                         let (new_left, new_right) = if current_key.node_key.is_right(distance - 1) {
                             (&parent_branch.left, remained)
                         } else {
@@ -242,6 +272,16 @@ SparseMerkleTree<H, V, S>
                         return Ok(new_hash)
                     }
                 }
+
+                let bottom_cnt = if let Some(bottom_cnt) =  self.leaves_cnt.get(&self.height) {
+                    bottom_cnt.clone()
+                } else {
+                    0
+                };
+                if bottom_cnt == 0 { // empty bottom
+                    self.height = self.height - 1
+                }
+
             } else {
                 let target = if key.is_right(distance) {
                     right

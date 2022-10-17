@@ -72,7 +72,7 @@ pub mod merkle_proof;
 #[cfg(test)]
 mod tests;
 pub mod traits;
-//pub mod tree;
+pub mod tree;
 pub mod trie_tree;
 
 pub use ckb_smt::{SMTBuilder, SMT};
