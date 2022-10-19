@@ -502,7 +502,26 @@ impl CompiledMerkleProof {
                                 sub_proof.extend(zero_bits.as_slice());
                                 is_last_merge_zero = false;
                             }
-                            MergeValue::TrieValue(key, value) => {}
+                            MergeValue::TrieValue(key, value) => {
+                                if value.is_zero() {
+                                    if is_last_merge_zero {
+                                        let last_n = *sub_proof.last().unwrap();
+                                        if last_n == 0 {
+                                            return Err(Error::CorruptedProof);
+                                        }
+                                        *sub_proof.last_mut().unwrap() = last_n.wrapping_add(1);
+                                    } else {
+                                        sub_proof.push(0x4F);
+                                        sub_proof.push(1);
+                                        is_last_merge_zero = true;
+                                    }
+                                } else {
+                                    sub_proof.push(0x50);
+                                    sub_proof.extend(value.as_slice());
+                                    is_last_merge_zero = false;
+                                }
+
+                            }
                         };
                     }
                 }

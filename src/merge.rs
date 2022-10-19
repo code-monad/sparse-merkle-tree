@@ -1,10 +1,8 @@
-use std::any::Any;
 use crate::h256::H256;
 use crate::traits::Hasher;
 
 const MERGE_NORMAL: u8 = 1;
 const MERGE_ZEROS: u8 = 2;
-const MERGE_TRIE: u8 = 3;
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum MergeValue {
@@ -64,7 +62,7 @@ impl MergeValue {
                 } else {
 
                     let mut hasher = H::default();
-                    hasher.write_byte(MERGE_TRIE);
+                    //hasher.write_byte(MERGE_TRIE);
                     //hasher.write_h256(k);
                     hasher.write_h256(v);
                     hasher.finish()
@@ -133,7 +131,7 @@ pub fn merge_trie<H: Hasher + Default> (height: u8,
     if lhs.is_zero() && rhs.is_zero() {
         return MergeValue::zero();
     }
-    hasher.write_byte(MERGE_TRIE);
+    hasher.write_byte(MERGE_NORMAL);
     hasher.write_byte(height);
     hasher.write_h256(node_key);
     hasher.write_h256(&lhs.hash::<H>());
