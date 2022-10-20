@@ -370,7 +370,6 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
         for current_key in &keys {
             let mut bitmap = H256::zero();
             self.try_proof(current_key.clone(), MergeValue::trie_from_h256(H256::zero(), self.root), 0,&mut bitmap, &mut proof)?;
-
             leaves_bitmap.push(bitmap);
         }
 
@@ -393,7 +392,7 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
 
             proof.push(current.clone());
             self.try_proof(key, sibling, distance+1, bitmap, proof)?
-        } else {
+        } else { // reached leaf
             if current.key() == key {  // exists
                 bitmap.set_bit(height);
             } else { // non exist
