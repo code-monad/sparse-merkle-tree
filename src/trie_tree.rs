@@ -11,6 +11,11 @@ use crate::{
 use core::marker::PhantomData;
 
 
+#[derive(Debug, PartialEq)]
+pub enum HighestDirection{
+    Left,
+    Right,
+}
 
 /// Sparse merkle tree
 #[derive(Default, Debug)]
@@ -20,6 +25,7 @@ pub struct SparseMerkleTree<H, V, S> {
     phantom: PhantomData<(H, V)>,
     height: u8,
     leaves_cnt: BTreeMap<u8,usize>,
+    highest: Option<HighestDirection>,
 }
 
 impl<H, V, S: StoreReadOps<V>> SparseMerkleTree<H, V, S> {
@@ -31,6 +37,7 @@ impl<H, V, S: StoreReadOps<V>> SparseMerkleTree<H, V, S> {
             phantom: PhantomData,
             height: 0,
             leaves_cnt: BTreeMap::<u8,usize>::new(),
+            highest: None,
         }
     }
 
@@ -84,8 +91,10 @@ SparseMerkleTree<H, V, S>
 
         if self.root.is_zero() && !node.is_zero() { // empty root, build branch for root and update it
             let (left, right) = if key.is_right(0) {
+                self.highest = Some(HighestDirection::Right);
                 (MergeValue::zero(), node)
             } else {
+                self.highest = Some(HighestDirection::Left);
                 (node, MergeValue::zero())
             };
             // update root hash immediately
@@ -107,7 +116,10 @@ SparseMerkleTree<H, V, S>
                 self.root = new_root;
             } // else the root is not updated
 
-            //self.refresh_tree_hash(prev_height)?;
+            if prev_height != self.height {
+                self.refresh_tree_hash(prev_height)?;
+            }
+            //
         }
 
         Ok(&self.root)
@@ -120,10 +132,17 @@ SparseMerkleTree<H, V, S>
 
         if let Some(parent_branch) = self.store.get_branch(&current_key)? {
             let (left, right) = (parent_branch.left, parent_branch.right);
-            let (target, another) = if key.is_right(distance) {
-                (left, right)
-            } else {
-                (right, left)
+            let (target, another) = if distance != 0 {
+                if key.is_right(distance) {
+                    (left, right)
+                } else {
+                    (right, left)
+                }
+            }  else { // we need to avoid inserting to highest sub-tree
+                match self.highest {
+                    Some(HighestDirection::Left) => (right, left),
+                    _ => (left, right),
+                }
             };
 
             if target.is_zero() { // insert inplace
