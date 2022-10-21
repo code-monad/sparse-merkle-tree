@@ -145,11 +145,7 @@ SparseMerkleTree<H, V, S>
                 self.store.insert_branch(new_branch_key, new_branch)?;
 
                 // update current height count
-                let current_cnt = if self.leaves_cnt.contains_key(&distance) {
-                    self.leaves_cnt[&distance]
-                } else {
-                    0
-                };
+                let current_cnt = self.get_leaves_count_by_distance(distance);
 
                 self.leaves_cnt.insert(distance,current_cnt + 1);
 
@@ -183,11 +179,7 @@ SparseMerkleTree<H, V, S>
             }
 
             // update leaves count
-            let current_cnt = if self.leaves_cnt.contains_key(&(distance + 1)) {
-                self.leaves_cnt[&(distance + 1)]
-            } else {
-                0
-            };
+            let current_cnt = self.get_leaves_count_by_distance(distance + 1);
 
             self.leaves_cnt.insert(height + 1,current_cnt + 2);
             let new_merge = merge_trie::<H>(height + 1, &parent_key.node_key, &left, &right);
@@ -217,11 +209,7 @@ SparseMerkleTree<H, V, S>
                 } else {
                     &left
                 };
-                let current_cnt = if self.leaves_cnt.contains_key(&distance) {
-                    self.leaves_cnt[&distance]
-                } else {
-                    1
-                };
+                let current_cnt = self.get_leaves_count_by_distance(distance);
 
                 // decreasing
                 self.leaves_cnt.insert(distance,current_cnt - 1);
@@ -231,22 +219,14 @@ SparseMerkleTree<H, V, S>
                     self.store.remove_branch(&current_key)?;
                 } else { // move neighbor up
                     self.store.remove_branch(&current_key)?;
-
-
                     if let Some(parent_branch) = self.store.get_branch(&parent_key)? {
-                        let current_cnt = if self.leaves_cnt.contains_key(&distance) {
-                            self.leaves_cnt[&height]
-                        } else {
-                            1
-                        };
+                        let current_cnt = self.get_leaves_count_by_distance(distance);
                         // decreasing
-                        self.leaves_cnt.insert(distance,current_cnt - 1);
+                        if current_cnt != 0 {
+                            self.leaves_cnt.insert(distance,current_cnt - 1);
+                        }
                         // increasing parent
-                        let parent_cnt = if self.leaves_cnt.contains_key(&(distance - 1)) {
-                            self.leaves_cnt[&(height+1)]
-                        } else {
-                            0
-                        };
+                        let parent_cnt = self.get_leaves_count_by_distance(distance - 1);
                         self.leaves_cnt.insert(distance-1, parent_cnt + 1);
 
                         let (new_left, new_right) = if current_key.node_key.is_right(distance - 1) {
@@ -279,11 +259,7 @@ SparseMerkleTree<H, V, S>
                     }
                 }
 
-                let bottom_cnt = if let Some(bottom_cnt) =  self.leaves_cnt.get(&(prev_height - distance)) {
-                    bottom_cnt.clone()
-                } else {
-                    0
-                };
+                let bottom_cnt = self.get_leaves_count_by_distance(prev_height);
                 if bottom_cnt == 0 { // empty bottom
                     self.height = self.height - 1
                 }
@@ -341,6 +317,14 @@ SparseMerkleTree<H, V, S>
             Ok(new_merge)
         } else {
             Ok(current)
+        }
+    }
+
+    fn get_leaves_count_by_distance(&self, distance: u8) -> usize {
+        if let Some(cnt) = self.leaves_cnt.get(&distance) {
+            cnt.clone()
+        } else {
+            0
         }
     }
 }
