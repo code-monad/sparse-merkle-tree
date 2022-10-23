@@ -181,6 +181,7 @@ fn test_delete_a_leaf() {
         .into();
     tree.update(key, value).unwrap();
 
+
     let root = *tree.root();
     let store = tree.store().clone();
 
