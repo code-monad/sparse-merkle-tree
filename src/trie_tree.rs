@@ -11,11 +11,6 @@ use crate::{
 use core::marker::PhantomData;
 
 
-#[derive(Debug, PartialEq)]
-pub enum HighestDirection{
-    Left,
-    Right,
-}
 
 /// Sparse merkle tree
 #[derive(Default, Debug)]
@@ -25,7 +20,6 @@ pub struct SparseMerkleTree<H, V, S> {
     phantom: PhantomData<(H, V)>,
     height: u8,
     leaves_cnt: BTreeMap<u8,usize>,
-    highest: Option<HighestDirection>,
 }
 
 impl<H, V, S: StoreReadOps<V>> SparseMerkleTree<H, V, S> {
@@ -37,7 +31,6 @@ impl<H, V, S: StoreReadOps<V>> SparseMerkleTree<H, V, S> {
             phantom: PhantomData,
             height: 0,
             leaves_cnt: BTreeMap::<u8,usize>::new(),
-            highest: None,
         }
     }
 
@@ -81,7 +74,7 @@ SparseMerkleTree<H, V, S>
     /// set to zero value to delete a key
     pub fn update(&mut self, key: H256, value: V) -> Result<&H256> {
         // compute and store new leaf
-        let node = MergeValue::trie_from_h256(key, value.to_h256());
+        let node = MergeValue::from_h256(value.to_h256());
         // notice when value is zero the leaf is deleted, so we do not need to store it
         if !node.is_zero() {
             self.store.insert_leaf(key, value)?;
@@ -91,10 +84,8 @@ SparseMerkleTree<H, V, S>
 
         if self.root.is_zero() && !node.is_zero() { // empty root, build branch for root and update it
             let (left, right) = if key.is_right(0) {
-                self.highest = Some(HighestDirection::Right);
                 (MergeValue::zero(), node)
             } else {
-                self.highest = Some(HighestDirection::Left);
                 (node, MergeValue::zero())
             };
             // update root hash immediately
@@ -102,64 +93,59 @@ SparseMerkleTree<H, V, S>
             self.root = merge_trie::<H>(self.height, &H256::zero(), &left, &right).hash::<H>();
 
             let branch = BranchNode { left, right };
-            self.store.insert_branch(BranchKey::new(self.height, H256::zero()), branch)?; // insert the branch
+            self.store.insert_branch(BranchKey::new(0, self.root), branch)?; // insert the branch
             self.leaves_cnt.insert(0, 1);
         } else {
             let prev_height = self.height;
-            let new_root = if !node.is_zero() { // insert
-                self.insert_node(key, node, 0, MergeValue::trie_from_h256(H256::zero(), self.root), &BranchKey::new(0, H256::zero()), prev_height)?
+
+            if !node.is_zero() {
+                self.insert_node(key, node, 0, MergeValue::trie_from_h256(self.height, self.root), &BranchKey::new(0, H256::zero()), prev_height, false)?
             } else { // delete
-                self.delete_node(key, node, 0, MergeValue::trie_from_h256(H256::zero(),self.root), &BranchKey::new(0, H256::zero()), prev_height)?
+                self.delete_node(key, node, 0, MergeValue::trie_from_h256(self.height, self.root), &BranchKey::new(0, H256::zero()), prev_height)?
             };
 
-            if let Some(new_root) = new_root {
-                self.root = new_root;
-            } // else the root is not updated
+            self.refresh_tree_hash()?;
 
-            if prev_height != self.height {
-                self.refresh_tree_hash(prev_height)?;
-            }
-            //
         }
 
         Ok(&self.root)
     }
 
     /// Walk-through recurse insertion fn
-    fn insert_node(&mut self, key: H256, node: MergeValue, distance: u8, current: MergeValue, parent_key: &BranchKey, prev_height: u8) -> Result<Option<H256>> {
-        let mut height = prev_height - distance; // transform height
-        let current_key = BranchKey::new(height, current.key());
+    fn insert_node(&mut self, key: H256, node: MergeValue, distance: u8, current: MergeValue, parent_key: &BranchKey, prev_height: u8, in_replace: bool) -> Result<Option<H256>> {
+        let height = prev_height - distance; // transform height
+        let current_key = BranchKey::new(distance, current.key());
 
         if let Some(parent_branch) = self.store.get_branch(&current_key)? {
-            let (left, right) = (parent_branch.left, parent_branch.right);
-            let (target, another) = if distance != 0 {
-                if key.is_right(distance) {
-                    (left, right)
-                } else {
-                    (right, left)
-                }
-            }  else { // we need to avoid inserting to highest sub-tree
-                match self.highest {
-                    Some(HighestDirection::Left) => (right, left),
-                    _ => (left, right),
-                }
+            let (left, right) = (parent_branch.left.clone(), parent_branch.right.clone());
+            let (target, another) =
+            if key.is_right(distance) {
+                (right, left)
+            } else {
+                (left, right)
             };
 
+            let (target, another) = if !target.is_zero() && !in_replace && key < target.key() && another.is_zero() {
+                 (another, target)
+            } else {
+                (target, another)
+            };
+
+
             if target.is_zero() { // insert inplace
-                let new_branch = if key.is_right(distance) {
-                    BranchNode {
-                        left: another,
-                        right: node,
-                    }
-                } else {
+                let new_branch = if target.key() == parent_branch.left.key() {
                     BranchNode {
                         left: node,
                         right: another,
                     }
+                } else {
+                    BranchNode {
+                        left: another,
+                        right: node,
+                    }
                 };
-                let new_branch_key = BranchKey::new(height, current.key());
-                let new_hash = merge::<H>(height, &parent_key.node_key, &new_branch.left, &new_branch.right);
-                let new_merge_value = MergeValue::trie_from_h256(current.key(), new_hash.hash::<H>());
+                let new_branch_key = BranchKey::new(distance, current.key());
+                let new_hash = merge_trie::<H>(height, &parent_key.node_key, &new_branch.left, &new_branch.right);
                 self.store.remove_branch(&current_key)?;
                 self.store.insert_branch(new_branch_key, new_branch)?;
 
@@ -168,48 +154,89 @@ SparseMerkleTree<H, V, S>
 
                 self.leaves_cnt.insert(distance,current_cnt + 1);
 
-                // update parent_branch because this current has updated
-                if let Some(parent_branch) = self.store.get_branch(parent_key)? { // when current is root, parent_key is ZERO so this won't match
-                    let (parent_left, parent_right) = if parent_branch.left.key() == parent_key.node_key {
-                        (new_merge_value, parent_branch.right)
-                    } else {
-                        (parent_branch.left, new_merge_value)
-                    };
-
-                    self.store.insert_branch(parent_key.clone(), BranchNode {
-                        left: parent_left,
-                        right: parent_right,
-                    })?;
-                }
                 Ok(Some(new_hash.hash::<H>()))
             } else {
-                // walk down the tree
-                self.insert_node(key, node, distance + 1, target, &BranchKey::new(height - 1, current.key()), prev_height)
+                if self.store.get_branch(&BranchKey::new(distance + 1, target.key()))?.is_none() { //  a leaf
+                    if !in_replace {
+                        if key > target.key() {
+                            //replace target with new
+                            self.store.remove_branch(&current_key)?;
+
+
+                            let new_branch = if another.key() == parent_branch.left.key() {
+                                BranchNode{
+                                    left: another,
+                                    right: node,
+                                }
+                            } else {
+                                BranchNode{
+                                    right: another,
+                                    left: node,
+                                }
+                            };
+                            self.store.insert_branch(current_key, new_branch)?;
+                            self.insert_node(target.key(), target, distance, current, &parent_key, prev_height, false)
+                        } else if another.key() < key { // enter another
+                            self.insert_node(key, node, distance + 1, another, &BranchKey::new(distance + 1, current.key()), prev_height, true)
+                        } else {
+                            // directly create new merge
+                            self.insert_node(key, node, distance + 1, target, &BranchKey::new(distance + 1, current.key()), prev_height, false)
+                        }
+                    } else {
+                        // walk down the tree
+                        self.insert_node(key, node, distance + 1, target, &BranchKey::new(distance + 1, current.key()), prev_height, true)
+                    }
+                } else {
+                        // walk down, to create new merge
+                        self.insert_node(key, node, distance + 1, target, &BranchKey::new(distance + 1, current.key()), prev_height, true)
+                }
+
             }
-        } else { // no branch before, add a new merge node, [MERGE_VALUE, (current, new)]
+        } else { // no branch before
             let (left, right) = if key.is_right(distance) {
-                (current, node)
+                (current.clone(), node)
             } else {
-                (node, current)
+                (node, current.clone())
             };
 
-            if distance + 1 > prev_height {
+            if distance + 1> prev_height {
                 self.height = distance + 1;
+            }
+
+            let current_cnt = self.get_leaves_count_by_distance(distance);
+            if current_cnt > 0 {
+                self.leaves_cnt.insert(distance, current_cnt - 1);
             }
 
             // update leaves count
             let current_cnt = self.get_leaves_count_by_distance(distance + 1);
 
-            self.leaves_cnt.insert(height + 1,current_cnt + 2);
-            let new_merge = merge_trie::<H>(height + 1, &parent_key.node_key, &left, &right);
+            self.leaves_cnt.insert(distance + 1,current_cnt + 2);
+            let new_merge = merge_trie::<H>(self.height - distance , &parent_key.node_key, &left, &right);
 
             // insert new branch
-            let new_key = BranchKey::new(height + 1, new_merge.hash::<H>());
+            let new_key = BranchKey::new(distance + 1, new_merge.key());
             self.store.insert_branch(new_key.clone(), BranchNode {
                 left: left.clone(),
                 right: right.clone(),
             })?;
 
+            // update parent
+            if let Some(parent) = self.store.get_branch(&parent_key)? {
+                let new_branch = if parent.left.key() == current.key(){
+                    BranchNode {
+                        left: new_merge.clone(),
+                        right: parent.right,
+                    }
+                }  else {
+                    BranchNode {
+                        left: parent.left,
+                        right: new_merge.clone(),
+                    }
+                };
+                self.store.remove_branch(parent_key)?;
+                self.store.insert_branch(parent_key.clone(), new_branch)?;
+            }
             Ok(Some(new_merge.hash::<H>()))
         }
     }
@@ -217,16 +244,16 @@ SparseMerkleTree<H, V, S>
     /// Walk-through recurse insertion fn
     fn delete_node(&mut self, key: H256, node: MergeValue, distance: u8, current: MergeValue, parent_key: &BranchKey, prev_height: u8) -> Result<Option<H256>> {
         let height = prev_height - distance;
-        let current_key = BranchKey::new(height, current.key());
+        let current_key = BranchKey::new(distance, current.key());
         let branch = self.store.get_branch(&current_key)?;
         if !branch.is_none() {
             let branch = branch.unwrap();
             let (left, right) = (branch.left, branch.right);
             if left.key() == key || right.key() == key {
                 let remained = if left.key() == key {
-                    &right
+                    right
                 } else {
-                    &left
+                    left
                 };
                 let current_cnt = self.get_leaves_count_by_distance(distance);
 
@@ -239,27 +266,20 @@ SparseMerkleTree<H, V, S>
                 } else { // move neighbor up
                     self.store.remove_branch(&current_key)?;
                     if let Some(parent_branch) = self.store.get_branch(&parent_key)? {
+                        self.store.remove_branch(&current_key)?;
                         let current_cnt = self.get_leaves_count_by_distance(distance);
                         // decreasing
                         if current_cnt != 0 {
                             self.leaves_cnt.insert(distance,current_cnt - 1);
                         }
-                        // increasing parent
-                        let parent_cnt = self.get_leaves_count_by_distance(distance - 1);
-                        self.leaves_cnt.insert(distance-1, parent_cnt + 1);
 
-                        let (new_left, new_right) = if current_key.node_key.is_right(distance - 1) {
-                            (&parent_branch.left, remained)
+                        let (new_left, new_right) = if parent_branch.left.key() == current_key.node_key {
+                            (remained, parent_branch.right)
                         } else {
-                            (remained, &parent_branch.right)
+                            (parent_branch.left, remained)
                         };
-                        let new_parent_branch = BranchNode {
-                            left: new_left.clone(),
-                            right: new_right.clone(),
-                        };
-                        let new_hash = merge_trie::<H>(height, &parent_key.node_key, &new_left, &new_right).hash::<H>();
-                        self.store.insert_branch(parent_key.clone(), new_parent_branch)?;
-                        return Ok(Some(new_hash))
+
+                        self.store.insert_branch(parent_key.clone(), BranchNode{left: new_left, right: new_right})?;
                     } else { // this is root, remain the dangling sibling
                         let new_branch = if remained.key().is_right(distance) {
                             BranchNode{
@@ -272,9 +292,11 @@ SparseMerkleTree<H, V, S>
                                 right: MergeValue::zero(),
                             }
                         };
-                        let new_hash = merge_trie::<H>(height, &parent_key.node_key, &new_branch.left, &new_branch.right).hash::<H>();
-                        self.store.insert_branch(BranchKey::new(height, parent_key.node_key), new_branch)?;
-                        return Ok(Some(new_hash))
+                        let new_hash = merge_trie::<H>(height, &parent_key.node_key, &new_branch.left, &new_branch.right);
+                        self.store.insert_branch(BranchKey::new(distance, new_hash.key()), new_branch)?;
+                        self.store.remove_branch(&BranchKey::new(0, self.root))?;
+                        self.root = new_hash.hash::<H>();
+                        return Ok(Some(self.root))
                     }
                 }
 
@@ -291,7 +313,8 @@ SparseMerkleTree<H, V, S>
                 };
 
                 // walk down the tree
-                return self.delete_node(key, node, distance + 1, target, &BranchKey::new(height - 1, current.key()), prev_height);
+                return self.delete_node(key, node, distance + 1, target, &BranchKey::new(distance + 1, current.key()), prev_height);
+
             }
         } else {
             return Ok(None);
@@ -316,26 +339,36 @@ SparseMerkleTree<H, V, S>
     }
 
     /// Update the tree root hence of height change
-    pub fn refresh_tree_hash(&mut self, prev_height: u8) -> Result<&H256> {
+    pub fn refresh_tree_hash(&mut self) -> Result<&H256> {
         if !self.root.is_zero() { // won't update empty tree
-            let root_value = MergeValue::trie_from_h256(H256::zero(), self.root);
-            self.root = self.refresh_hash(root_value, H256::zero(), 0, prev_height)?.hash::<H>();
+            let root_value = MergeValue::trie_from_h256(self.height,self.root);
+            self.root = self.refresh_hash(root_value, H256::zero(), 0)?.hash::<H>();
         }
         Ok(&self.root)
     }
 
-    fn refresh_hash(&mut self, current: MergeValue, parent_node: H256,distance: u8, prev_height: u8) -> Result<MergeValue> {
-        if let Some(branch) = self.store.get_branch(&BranchKey::new(prev_height - distance, current.key()))? {
-            let left = self.refresh_hash(branch.left, current.key(), distance + 1, prev_height)?;
-            let right = self.refresh_hash(branch.right, current.key(), distance + 1, prev_height)?;
-            let new_merge = merge_trie::<H>(self.height - distance, &parent_node, &left, &right);
-            self.store.remove_branch(&BranchKey::new(prev_height - distance, current.key()))?;
-            self.store.insert_branch(BranchKey::new(self.height - distance, new_merge.hash::<H>()), BranchNode {
-                left, right
-            })?;
+    fn refresh_hash(&mut self, current: MergeValue, parent_node: H256,distance: u8) -> Result<MergeValue> {
+        if let Some(branch) = self.store.get_branch(&BranchKey::new(distance, current.key()))? {
+            let left = self.refresh_hash(branch.left, current.key(), distance + 1)?;
+            let right = self.refresh_hash(branch.right, current.key(), distance + 1)?;
+            let height = match current {
+              MergeValue::TrieValue(h,_) => h,
+                _ => panic!("Invalid Type of MergeValue"),
+            };
+            let new_merge = merge_trie::<H>(height, &parent_node, &left, &right);
+            self.store.remove_branch(&BranchKey::new(distance, current.key()))?;
+            if !(left.is_zero() && right.is_zero()) {
+                self.store.insert_branch(BranchKey::new(distance, new_merge.key()), BranchNode {
+                    left, right
+                })?;
+            }
             Ok(new_merge)
         } else {
-            Ok(current)
+            match current {
+                MergeValue::Value(_) => Ok(current),
+                MergeValue::TrieValue(_,_)=> Ok(MergeValue::zero()), // if not found, means it was set to empty
+                _ => Ok(MergeValue::zero()),
+            }
         }
     }
 
@@ -372,7 +405,7 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
         let mut proof: Vec<MergeValue> = Default::default();
         for current_key in &keys {
             let mut bitmap = H256::zero();
-            self.try_proof(current_key.clone(), MergeValue::trie_from_h256(H256::zero(), self.root), 0,&mut bitmap, &mut proof)?;
+            self.try_proof(current_key.clone(), MergeValue::from_h256(self.root), 0,&mut bitmap, &mut proof)?;
             leaves_bitmap.push(bitmap);
         }
 
@@ -382,7 +415,7 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
     pub fn try_proof(&self, key: H256, current: MergeValue, distance: u8, bitmap: &mut H256, proof: &mut Vec<MergeValue>) -> Result<()> {
         let height = self.height - distance;
 
-        if let Some(branch) = self.store.get_branch(&BranchKey::new(height, current.key()))? {
+        if let Some(branch) = self.store.get_branch(&BranchKey::new(distance, current.key()))? {
             let sibling = if key.is_right(self.height - distance) {
                 branch.right
             } else {
