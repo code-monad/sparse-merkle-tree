@@ -80,6 +80,13 @@ impl MergeValue {
 
         }
     }
+
+    pub fn height(&self) -> u8 {
+        match self {
+            MergeValue::TrieValue(h, _) => *h,
+            _ => panic!("Invalid Type of MergeValue"),
+        }
+    }
 }
 
 /// Hash base node into a H256
