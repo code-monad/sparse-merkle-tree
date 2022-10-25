@@ -88,9 +88,9 @@ SparseMerkleTree<H, V, S>
 
                 if target.is_shortcut() { // this is a shortcut
                     match target {
-                        MergeValue::ShortCut{ key: this_key, val, height} => {
+                        MergeValue::ShortCut{ key: this_key, value: val , height: h} => {
                             if this_key.eq(&key) { // we update its value
-                                let target = MergeValue::shortcut(key, node.hash::<H>(), height);
+                                let target = MergeValue::shortcut(key, node.hash::<H>(), h);
 
                                 let new_branch = if key.is_right(height) {
                                     BranchNode {
@@ -111,16 +111,10 @@ SparseMerkleTree<H, V, S>
                                 let (next_left, next_right) = if this_key.is_right(height - 1) {
                                     (MergeValue::zero(), MergeValue::shortcut(this_key, val, height - 1))
                                 } else {
-                                    (MergeValue::shortcut(this_key, val, height - 1), MergeValue::zero())
+                                    (MergeValue::shortcut(this_key, val,height - 1), MergeValue::zero())
                                 };
 
                                 let next_branch_key = BranchKey::new(height - 1, this_key.parent_path(height - 1));
-                                let new_next = merge::<H>(height - 1, &next_branch_key.node_key, &next_left, &next_right);
-                                if key.is_right(height) {
-                                    self.store.insert_branch(branch_key, BranchNode{ left: another, right: new_next})?;
-                                } else {
-                                    self.store.insert_branch(branch_key, BranchNode{ left: new_next, right: another})?;
-                                }
 
                                 self.store.insert_branch(next_branch_key, BranchNode{left: next_left, right: next_right})?;
                                 continue; // go next round
@@ -128,8 +122,20 @@ SparseMerkleTree<H, V, S>
                         },
                         _ => unreachable!(),
                     }
+                } else {
+                    let insert_value = if height == 0 {
+                        node.clone()
+                    } else {
+                        MergeValue::shortcut(key, node.hash::<H>(), height)
+                    };
+                    let (left, right) = if key.is_right(height) {
+                        (another, insert_value)
+                    } else {
+                        (insert_value, another)
+                    };
+                    self.store.insert_branch(branch_key, BranchNode{ left, right})?;
                 }
-            } else if height > 0 { // adds a shortcut here
+            } else if !node.is_zero() { // adds a shortcut here
                 let shortcut = MergeValue::shortcut(key, node.hash::<H>(), height);
                 let (left, right) = if key.is_right(height) {
                     (MergeValue::zero(),shortcut)
@@ -138,21 +144,14 @@ SparseMerkleTree<H, V, S>
                 };
                 self.store.insert_branch(branch_key, BranchNode{ left, right })?;
                 break; // stop walking
-            } else {
-                let (left, right) = if key.is_right(height) {
-                    (MergeValue::zero(), node)
-                } else {
-                    (node, MergeValue::zero())
-                };
-                self.store.insert_branch(branch_key, BranchNode{ left, right })?;
-                break; // stop walking
-            }
+            } // do nothing with a zero insertion
         }
 
 
         for height in last_height..=core::u8::MAX { // update tree hash from insert pos to top
             let node_key = key.parent_path(height);
             let branch_key = BranchKey::new(height, node_key);
+
             let new_merge = if let Some(branch) = self.store.get_branch(&branch_key)? {
                 merge::<H>(height, &node_key, &branch.left, &branch.right)
             } else {
@@ -164,14 +163,21 @@ SparseMerkleTree<H, V, S>
                 // updates parent branch
                 let parent_key = key.parent_path(height + 1);
                 let parent_branch_key = BranchKey::new(height + 1, parent_key);
+                if new_merge.is_shortcut() { // move up
+                    self.store.remove_branch(&branch_key)?;
+                }
                 if let Some(parent_branch) = self.store.get_branch(&parent_branch_key)? {
-                    let (left, right) = if key.is_right(height + 1) {
+                    let (left,right) = if key.is_right(height + 1) {
                         (parent_branch.left, new_merge)
                     } else {
                         (new_merge, parent_branch.right)
                     };
-                    let new_parent_branch = BranchNode{ left, right};
-                    self.store.insert_branch(parent_branch_key, new_parent_branch)?;
+                    if left.is_zero() && right.is_zero() {
+                        self.store.remove_branch(&parent_branch_key)?;
+                    } else {
+                        let new_parent_branch = BranchNode { left, right };
+                        self.store.insert_branch(parent_branch_key, new_parent_branch)?;
+                    }
                 }
             }
         }

@@ -1,3 +1,4 @@
+use std::ptr::hash;
 use crate::h256::H256;
 use crate::traits::Hasher;
 
@@ -14,7 +15,7 @@ pub enum MergeValue {
     },
     ShortCut {
         key: H256,
-        val: H256,
+        value: H256,
         height: u8,
     },
 }
@@ -37,17 +38,17 @@ impl MergeValue {
             MergeValue::MergeWithZero{base_node, zero_bits, zero_count} => {
                 base_node.is_zero()
             },
-            MergeValue::ShortCut {key: _, val, height:_} => {
-                val.is_zero()
+            MergeValue::ShortCut {key: _, value, height: _} => {
+                value.is_zero()
             }
         }
     }
 
-    pub fn shortcut(key: H256, val: H256, height: u8) ->  Self{ MergeValue::ShortCut{key, val, height} }
+    pub fn shortcut(key: H256, value: H256, height: u8) ->  Self{ MergeValue::ShortCut{key, value, height} }
 
     pub fn is_shortcut(&self) -> bool {
         match self {
-            MergeValue::ShortCut{key : _, val: _, height:_} => {
+            MergeValue::ShortCut{key : _, value: _, height: _} => {
                 true
             },
             _ => false,
@@ -70,11 +71,21 @@ impl MergeValue {
                 hasher.finish()
             },
             MergeValue::ShortCut {
-                key: _,
-                val ,
-                height:_,
-            } => {
-                *val
+                key,
+                value,
+                height,
+            } => { // try keep hash same with MergeWithZero
+                if value.is_zero() {
+                    return H256::zero()
+                }
+
+                let mut hasher = H::default();
+                hasher.write_byte(MERGE_ZEROS);
+                let base_node = hash_base_node::<H>(*height, key, value);
+                hasher.write_h256(&base_node);
+                hasher.write_h256(key);
+                hasher.write_byte(*height);
+                hasher.finish()
             },
         }
     }
@@ -157,9 +168,14 @@ fn merge_with_zero<H: Hasher + Default>(
             }
         }
         MergeValue::ShortCut {
-           key:_, val:_, height: _
+           key, value, height: _
         } => {
-            value.clone()
+            if height == core::u8::MAX {
+                let base_node = hash_base_node::<H>(height, key, value);
+                MergeValue::Value(base_node)
+            } else {
+                MergeValue::shortcut(*key, *value, height + 1)
+            }
         }
     }
 }

@@ -172,15 +172,9 @@ fn test_delete_a_leaf() {
     let key = [
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 2,
-    ]
-        .into();
-    let value = [
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 1,
-    ]
-        .into();
-    tree.update(key, value).unwrap();
+    ].into();
 
+    tree.update(key, value).unwrap();
 
     let root = *tree.root();
     let store = tree.store().clone();
@@ -201,7 +195,7 @@ fn test_delete_a_leaf() {
 
     // delete a leaf
     tree.update(key, H256::zero()).unwrap();
-    //assert_eq!(tree.root(), &root);
+    assert_eq!(tree.root(), &root);
     assert_eq!(tree.store().leaves_map(), store.leaves_map());
     assert_eq!(tree.store().branches_map(), store.branches_map());
 }
