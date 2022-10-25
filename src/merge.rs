@@ -6,13 +6,17 @@ const MERGE_ZEROS: u8 = 2;
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum MergeValue {
-    Value(H256), // K,V
+    Value(H256),
     MergeWithZero {
         base_node: H256,
         zero_bits: H256,
         zero_count: u8,
     },
-    TrieValue(u8, H256, H256), // TrieValue(h, V)  = (height, node_value)
+    ShortCut {
+        key: H256,
+        val: H256,
+        height: u8,
+    },
 }
 
 impl MergeValue {
@@ -20,9 +24,6 @@ impl MergeValue {
         MergeValue::Value(v)
     }
 
-    pub fn trie_from_h256(h: u8, k: H256, v: H256) -> Self {
-        MergeValue::TrieValue(h,  k,v)
-    }
 
     pub fn zero() -> Self {
         MergeValue::Value(H256::zero())
@@ -33,11 +34,23 @@ impl MergeValue {
             MergeValue::Value(v) => {
                 v.is_zero()
             },
-            MergeValue::TrieValue(_,_, v) => {
-                v.is_zero()
+            MergeValue::MergeWithZero{base_node, zero_bits, zero_count} => {
+                base_node.is_zero()
             },
-            _ => false
+            MergeValue::ShortCut {key: _, val, height:_} => {
+                val.is_zero()
+            }
+        }
+    }
 
+    pub fn shortcut(key: H256, val: H256, height: u8) ->  Self{ MergeValue::ShortCut{key, val, height} }
+
+    pub fn is_shortcut(&self) -> bool {
+        match self {
+            MergeValue::ShortCut{key : _, val: _, height:_} => {
+                true
+            },
+            _ => false,
         }
     }
 
@@ -55,26 +68,17 @@ impl MergeValue {
                 hasher.write_h256(zero_bits);
                 hasher.write_byte(*zero_count);
                 hasher.finish()
-            }
-            MergeValue::TrieValue(h, _,v) => *v,
+            },
+            MergeValue::ShortCut {
+                key: _,
+                val ,
+                height:_,
+            } => {
+                *val
+            },
         }
     }
 
-    /// helper function for TrieValue to get key, simplify code
-    pub fn key(&self) -> H256 {
-        match self {
-            MergeValue::TrieValue(_, k, _ ) => *k,
-            _ => H256::zero(),
-
-        }
-    }
-
-    pub fn height(&self) -> u8 {
-        match self {
-            MergeValue::TrieValue(h, _, _) => *h,
-            _ => panic!("Invalid Type of MergeValue"),
-        }
-    }
 }
 
 /// Hash base node into a H256
@@ -117,23 +121,6 @@ pub fn merge<H: Hasher + Default>(
     MergeValue::Value(hasher.finish())
 }
 
-pub fn merge_trie<H: Hasher + Default> (height: u8,
-                                          node_key: &H256,
-                                          lhs: &MergeValue,
-                                          rhs: &MergeValue,) -> MergeValue {
-
-    let mut hasher = H::default();
-    if lhs.is_zero() && rhs.is_zero() {
-        return MergeValue::zero();
-    }
-    hasher.write_byte(MERGE_NORMAL);
-    hasher.write_byte(height);
-    hasher.write_h256(node_key);
-    hasher.write_h256(&lhs.hash::<H>());
-    hasher.write_h256(&rhs.hash::<H>());
-    let val = hasher.finish();
-    MergeValue::TrieValue(height, val, val)
-}
 
 fn merge_with_zero<H: Hasher + Default>(
     height: u8,
@@ -169,17 +156,10 @@ fn merge_with_zero<H: Hasher + Default>(
                 zero_count: zero_count.wrapping_add(1),
             }
         }
-        MergeValue::TrieValue(_, _, v) => {
-            let mut zero_bits = H256::zero();
-            if set_bit {
-                zero_bits.set_bit(height);
-            }
-            let base_node = hash_base_node::<H>(height, node_key, v);
-            MergeValue::MergeWithZero {
-                base_node,
-                zero_bits,
-                zero_count: 1,
-            }
+        MergeValue::ShortCut {
+           key:_, val:_, height: _
+        } => {
+            value.clone()
         }
     }
 }
