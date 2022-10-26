@@ -74,7 +74,7 @@ SparseMerkleTree<H, V, S>
         }
 
         let mut last_height = core::u8::MAX;
-        while last_height >= 0 { // walk from top to bottom
+        while last_height > 0 { // walk from top to bottom
             let node_key = key.parent_path(last_height);
             let branch_key = BranchKey::new(last_height, node_key); // this represents a position in the tree
             if let Some(branch) = self.store.get_branch(&branch_key)? { // if we we found a record in here
