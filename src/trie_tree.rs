@@ -107,6 +107,9 @@ SparseMerkleTree<H, V, S>
                                 self.store.insert_branch(branch_key, new_branch)?;
                                 break;
                             } else { // we need to move this shortcut down
+
+                                // OPTIMIZATION: the shortcut must dropping to the level where [shortcut's new_height + 1] = [insert/delete key's shortcut height + 1]
+                                // check definition of H256.fork_height()
                                 last_height = this_key.fork_height(&key);
 
                                 let (next_left, next_right) = if this_key.is_right(last_height) {
