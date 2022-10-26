@@ -112,16 +112,16 @@ SparseMerkleTree<H, V, S>
                                 // check definition of H256.fork_height()
                                 last_height = this_key.fork_height(&key);
 
-                                let (next_left, next_right) = if this_key.is_right(last_height) {
-                                    (MergeValue::zero(), MergeValue::shortcut(this_key, val, last_height))
+                                let (next_left, next_right) = if key.is_right(last_height) {
+                                    (MergeValue::shortcut(this_key, val, last_height), MergeValue::shortcut(key, node.hash::<H>(), last_height))
                                 } else {
-                                    (MergeValue::shortcut(this_key, val,last_height), MergeValue::zero())
+                                    (MergeValue::shortcut(key, node.hash::<H>(), last_height), MergeValue::shortcut(this_key, val,last_height))
                                 };
 
                                 let next_branch_key = BranchKey::new(last_height, this_key.parent_path(last_height));
 
                                 self.store.insert_branch(next_branch_key, BranchNode{left: next_left, right: next_right})?;
-                                continue; // go next round
+                                break; // go next round
                             }
                         },
                         _ => unreachable!(),
