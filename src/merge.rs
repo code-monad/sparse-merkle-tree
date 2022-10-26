@@ -83,7 +83,9 @@ impl MergeValue {
                 hasher.write_byte(MERGE_ZEROS);
                 let base_node = hash_base_node::<H>(0, key, value);
                 hasher.write_h256(&base_node);
-                hasher.write_h256(&key.parent_path(*height));
+                let mut zero_bits = *key;
+                zero_bits.clear_bit(*height);
+                hasher.write_h256(&zero_bits);
                 hasher.write_byte(*height);
                 hasher.finish()
             },
@@ -172,13 +174,10 @@ fn merge_with_zero<H: Hasher + Default>(
         } => {
             if height == core::u8::MAX {
                 let base_node = hash_base_node::<H>(0, key, value);
-                let mut zero_bits = *key;
-                if set_bit {
-                    zero_bits.set_bit(height);
-                }
+
                 MergeValue::MergeWithZero {
                     base_node,
-                    zero_bits: zero_bits,
+                    zero_bits: *key,
                     zero_count: 0,
                 }
             } else {
