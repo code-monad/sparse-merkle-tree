@@ -8,7 +8,6 @@ use crate::{
     vec::Vec,
     H256, MAX_STACK_SIZE,
 };
-use core::cmp::Ordering;
 use core::marker::PhantomData;
 
 /// Sparse merkle tree

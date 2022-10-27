@@ -1,6 +1,5 @@
 use crate::h256::H256;
 use crate::traits::Hasher;
-use std::ptr::hash;
 
 const MERGE_NORMAL: u8 = 1;
 const MERGE_ZEROS: u8 = 2;
@@ -34,8 +33,8 @@ impl MergeValue {
             MergeValue::Value(v) => v.is_zero(),
             MergeValue::MergeWithZero {
                 base_node,
-                zero_bits,
-                zero_count,
+                zero_bits: _,
+                zero_count: _,
             } => base_node.is_zero(),
             MergeValue::ShortCut {
                 key: _,
@@ -75,7 +74,7 @@ impl MergeValue {
                 hasher.write_byte(*zero_count);
                 hasher.finish()
             }
-            MergeValue::ShortCut { key, value, height } => {
+            MergeValue::ShortCut { key: _, value, height: _ } => {
                 // try keep hash same with MergeWithZero
                 if value.is_zero() {
                     return H256::zero();
@@ -87,7 +86,7 @@ impl MergeValue {
 
     pub fn base_node<H: Hasher + Default>(&self) -> H256 {
         match self {
-            MergeValue::ShortCut { key, value, height } => {
+            MergeValue::ShortCut { key, value, height: _ } => {
                 let base_key = key.parent_path(0);
                 hash_base_node::<H>(0, &base_key, value)
             },
@@ -121,7 +120,7 @@ impl MergeValue {
             MergeValue::MergeWithZero { base_node:_, zero_bits: _, zero_count: _ } => {
                 self.clone()
             },
-            MergeValue::Value(value) => {
+            MergeValue::Value(_) => {
                 unreachable!();
             }
         }
@@ -205,7 +204,7 @@ fn merge_with_zero<H: Hasher + Default>(
         MergeValue::ShortCut {
             key,
             value,
-            height: h,
+            height: _,
         } => {
             if height == core::u8::MAX {
                 let base_key = key.parent_path(0);

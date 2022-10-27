@@ -105,7 +105,7 @@ impl MerkleProof {
                                 (Some(0x51), Some(buffer))
                             }
                             MergeValue::ShortCut {
-                                key,
+                                key: _,
                                 value: val,
                                 height: _,
                             } => (Some(0x52), Some(val.as_slice().to_vec())),
@@ -507,8 +507,8 @@ impl CompiledMerkleProof {
                                 is_last_merge_zero = false;
                             }
                             MergeValue::ShortCut {
-                                key,
-                                value: val,
+                                key: _,
+                                value: _,
                                 height: _,
                             } => {}
                         };

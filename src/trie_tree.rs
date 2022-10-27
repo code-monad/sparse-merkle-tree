@@ -1,12 +1,11 @@
 use crate::{
     branch::*,
-    collections::BTreeMap,
     error::{Error, Result},
     merge::{merge, MergeValue},
     merkle_proof::MerkleProof,
     traits::{Hasher, StoreReadOps, StoreWriteOps, Value},
     vec::Vec,
-    H256, MAX_STACK_SIZE,
+    H256,
 };
 use core::marker::PhantomData;
 
@@ -267,7 +266,10 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
         let mut proof: Vec<MergeValue> = Default::default();
         for current_key in &keys {
             let mut bitmap = H256::zero();
-            //self.try_proof(current_key.clone(), MergeValue::from_h256(self.root), 0, &mut bitmap, &mut proof)?;
+            for height in (0..=core::u8::MAX).rev() {
+
+            }
+
             leaves_bitmap.push(bitmap);
         }
 
