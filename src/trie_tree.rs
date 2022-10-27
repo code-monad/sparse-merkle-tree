@@ -257,7 +257,7 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
         // Collect leaf bitmaps
         let mut leaves_bitmap: Vec<H256> = Default::default();
         for current_key in &keys {
-            let mut bitmap = H256::zero();
+            let mut bitmap = current_key.clone();
             for height in (0..=core::u8::MAX).rev() {
                 let parent_key = current_key.parent_path(height);
                 let parent_branch_key = BranchKey::new(height, parent_key);
@@ -267,17 +267,17 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
                     } else {
                         (parent_branch.right, parent_branch.left)
                     };
-                    if !sibling.is_zero() {
+                    if sibling.is_zero() {
+                        bitmap.clear_bit(height);
+                    } else {
                         bitmap.set_bit(height);
                     }
                     if target.is_shortcut() {
-                        let mut zero_bits = current_key.clone();
                         for i in height..=core::u8::MAX {
-                            if !current_key.is_right(i) {
-                                zero_bits.clear_bit(core::u8::MAX - i);
+                            if current_key.is_right(core::u8::MAX - i) {
+                                bitmap.clear_bit(core::u8::MAX - i);
                             }
                         }
-                        bitmap = zero_bits;
                         break; // no need to check rest bits, since all sibling will be zero
                     }
                 }
@@ -323,16 +323,19 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
                                 sibling
                             };
                             proof_results.push(val);
-                        }
-                        if current.is_shortcut() {
+                        } else if current.is_shortcut() {
                             let base_node = current.base_node::<H>();
                             let mut zero_bits = leaf_key.clone();
-                            for i in (core::u8::MAX - height + 1)..=core::u8::MAX {
+                            let mut zero_count = (core::u8::MAX - height);
+                            if zero_count < core::u8::MAX {
+                                zero_count += 1;
+                            }
+
+                            for i in zero_count..=core::u8::MAX {
                                 if leaf_key.is_right(i) {
                                     zero_bits.clear_bit(i);
                                 }
                             }
-                            let zero_count = core::u8::MAX - height + 1;
                             proof_results.push(MergeWithZero { base_node, zero_bits, zero_count});
                             break;
                         }
