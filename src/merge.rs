@@ -99,7 +99,7 @@ impl MergeValue {
         }
     }
 
-    fn into_merge_with_zero<H: Hasher + Default>(&self) -> MergeValue {
+    pub fn into_merge_with_zero<H: Hasher + Default>(&self) -> MergeValue {
         match self {
             MergeValue::ShortCut { key, value, height } => {
                 let base_key = key.parent_path(0);
