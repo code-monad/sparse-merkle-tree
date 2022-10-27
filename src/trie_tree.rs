@@ -280,9 +280,6 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
                                 bitmap.clear_bit(core::u8::MAX - i);
                             }
                         }
-                        if !sibling.is_zero() {
-                            bitmap.set_bit(height);
-                        }
                         break; // no need to check rest bits, since all sibling will be zero
                     }
                 }
@@ -341,7 +338,12 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
                             }
                         } else if leaves_bitmap[leaf_index].get_bit(height){
                             if !sibling.is_zero(){
-                                proof.push(sibling);
+                                if sibling.is_shortcut() {
+                                    proof.push(sibling.into_merge_with_zero::<H>());
+                                } else {
+                                    proof.push(sibling);
+                                }
+
                             }
                         }
                     } else {
