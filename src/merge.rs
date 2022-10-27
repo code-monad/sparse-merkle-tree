@@ -74,12 +74,16 @@ impl MergeValue {
                 hasher.write_byte(*zero_count);
                 hasher.finish()
             }
-            MergeValue::ShortCut { key: _, value, height: _ } => {
+            MergeValue::ShortCut { key: _, value, height } => {
                 // try keep hash same with MergeWithZero
                 if value.is_zero() {
                     return H256::zero();
                 }
-                self.into_merge_with_zero::<H>().hash::<H>()
+                if *height == 0 {
+                    *value
+                } else {
+                    self.into_merge_with_zero::<H>().hash::<H>()
+                }
             }
         }
     }
