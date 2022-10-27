@@ -172,7 +172,8 @@ fn test_delete_a_leaf() {
     let key = [
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 2,
-    ].into();
+    ]
+    .into();
 
     tree.update(key, value).unwrap();
 
@@ -700,16 +701,16 @@ fn test_trie_broken_sample() {
         "5eff886ea0ce6ca488a3d6e336d6c0f75f46d19b42c06ce5ee98e42c96d256c7",
         "6d5257204ebe7d88fd91ae87941cb2dd9d8062b64ae5a2bd2d28ec40b9fbf6df",
     ]
-        .into_iter()
-        .map(parse_h256);
+    .into_iter()
+    .map(parse_h256);
 
     let values = vec![
         "0000000000000000000000000000000000000000000000000000000000000001",
         "0000000000000000000000000000000000000000000000000000000000000002",
         "0000000000000000000000000000000000000000000000000000000000000003",
     ]
-        .into_iter()
-        .map(parse_h256);
+    .into_iter()
+    .map(parse_h256);
 
     let mut pairs = keys.zip(values).collect::<Vec<_>>();
     let smt = new_smt(pairs.clone());

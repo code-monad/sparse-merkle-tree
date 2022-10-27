@@ -35,7 +35,6 @@ pub struct BranchNode {
     pub right: MergeValue,
 }
 
-
 impl BranchNode {
     /// Create a new empty branch
     pub fn new_empty() -> BranchNode {

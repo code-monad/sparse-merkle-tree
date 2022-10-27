@@ -104,13 +104,11 @@ impl MerkleProof {
                                 buffer.extend_from_slice(zero_bits.as_slice());
                                 (Some(0x51), Some(buffer))
                             }
-                            MergeValue::ShortCut{
+                            MergeValue::ShortCut {
                                 key,
                                 value: val,
                                 height: _,
-                            } => {
-                                (Some(0x52), Some(val.as_slice().to_vec()))
-                            }
+                            } => (Some(0x52), Some(val.as_slice().to_vec())),
                         }
                     } else {
                         zero_count += 1;
@@ -507,14 +505,12 @@ impl CompiledMerkleProof {
                                 sub_proof.extend(base_node.as_slice());
                                 sub_proof.extend(zero_bits.as_slice());
                                 is_last_merge_zero = false;
-                            },
+                            }
                             MergeValue::ShortCut {
                                 key,
                                 value: val,
                                 height: _,
-                            } => {
-
-                            }
+                            } => {}
                         };
                     }
                 }
