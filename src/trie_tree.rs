@@ -1,5 +1,6 @@
 use crate::{branch::*, error::{Error, Result}, merge::{merge, MergeValue}, merkle_proof::MerkleProof, traits::{Hasher, StoreReadOps, StoreWriteOps, Value}, vec::Vec, H256, MAX_STACK_SIZE};
 use core::marker::PhantomData;
+use crate::merge::MergeValue::MergeWithZero;
 
 /// Sparse merkle tree
 #[derive(Default, Debug)]
@@ -270,6 +271,13 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
                         bitmap.set_bit(height);
                     }
                     if target.is_shortcut() {
+                        let mut zero_bits = current_key.clone();
+                        for i in height..=core::u8::MAX {
+                            if !current_key.is_right(i) {
+                                zero_bits.clear_bit(core::u8::MAX - i);
+                            }
+                        }
+                        bitmap = zero_bits;
                         break; // no need to check rest bits, since all sibling will be zero
                     }
                 }
@@ -299,23 +307,34 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
                 // has non-zero sibling
                 if stack_top > 0 && stack_fork_height[stack_top - 1] == height {
                     stack_top -= 1;
-                } else if leaves_bitmap[leaf_index].get_bit(height) {
+                } else {
                     let parent_branch_key = BranchKey::new(height, parent_key);
                     if let Some(parent_branch) = self.store.get_branch(&parent_branch_key)? {
-                        let sibling = if is_right {
-                            parent_branch.left
+                        let (sibling,current) = if is_right {
+                            (parent_branch.left, parent_branch.right)
                         } else {
-                            parent_branch.right
+                            (parent_branch.right, parent_branch.left)
                         };
-                        if !sibling.is_zero() {
+
+                        if !sibling.is_zero(){
                             let val = if sibling.is_shortcut() {
                                 sibling.into_merge_with_zero::<H>()
                             } else {
                                 sibling
                             };
                             proof_results.push(val);
-                        } else {
-                            unreachable!();
+                        }
+                        if current.is_shortcut() {
+                            let base_node = current.base_node::<H>();
+                            let mut zero_bits = leaf_key.clone();
+                            for i in (core::u8::MAX - height + 1)..=core::u8::MAX {
+                                if leaf_key.is_right(i) {
+                                    zero_bits.clear_bit(i);
+                                }
+                            }
+                            let zero_count = core::u8::MAX - height + 1;
+                            proof_results.push(MergeWithZero { base_node, zero_bits, zero_count});
+                            break;
                         }
                     } else {
                         // The key is not in the tree
