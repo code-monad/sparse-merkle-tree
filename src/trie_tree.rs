@@ -340,7 +340,7 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
                             }
                         } else if leaves_bitmap[leaf_index].get_bit(height) {
                             if !sibling.is_zero(){
-                                if sibling.is_shortcut() {
+                                if sibling.is_shortcut() && height != 0 {
                                     proof.push(sibling.into_merge_with_zero::<H>());
                                 } else {
                                     proof.push(sibling);
