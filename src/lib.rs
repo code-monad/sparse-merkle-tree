@@ -63,6 +63,7 @@
 
 pub mod blake2b;
 pub mod branch;
+#[cfg(feature = "smtc")]
 pub mod ckb_smt;
 pub mod default_store;
 pub mod error;
@@ -75,6 +76,7 @@ pub mod traits;
 pub mod tree;
 pub mod trie_tree;
 
+#[cfg(feature = "smtc")]
 pub use ckb_smt::{SMTBuilder, SMT};
 pub use h256::H256;
 pub use merkle_proof::{CompiledMerkleProof, MerkleProof};
