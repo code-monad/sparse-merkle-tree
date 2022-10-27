@@ -1,5 +1,6 @@
 use crate::{branch::*, error::{Error, Result}, merge::{merge, MergeValue}, merkle_proof::MerkleProof, traits::{Hasher, StoreReadOps, StoreWriteOps, Value}, vec::Vec, H256, MAX_STACK_SIZE};
 use core::marker::PhantomData;
+use std::thread::current;
 use crate::merge::MergeValue::MergeWithZero;
 
 /// Sparse merkle tree
@@ -259,7 +260,7 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
         // Collect leaf bitmaps
         let mut leaves_bitmap: Vec<H256> = Default::default();
         for current_key in &keys {
-            let mut bitmap = current_key.clone();
+            let mut bitmap = H256::zero();
             for height in (0..=core::u8::MAX).rev() {
                 let parent_key = current_key.parent_path(height);
                 let parent_branch_key = BranchKey::new(height, parent_key);
@@ -269,18 +270,19 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
                     } else {
                         (parent_branch.right, parent_branch.left)
                     };
-                    if sibling.is_zero() {
-                        bitmap.clear_bit(height);
-                    } else {
-                        bitmap.set_bit(height);
-                    }
+
                     if target.is_shortcut() {
-                        for i in height..=core::u8::MAX {
-                            if current_key.is_right(core::u8::MAX - i) {
-                                bitmap.clear_bit(core::u8::MAX - i);
-                            }
+                        if !sibling.is_zero()  {
+                            bitmap.set_bit(height);
+                        } else if height != 0 {
+                            bitmap.set_bit((core::u8::MAX - height).wrapping_add(1));
+                        } else {
+                            bitmap = current_key.clone();
+                            bitmap.clear_bit(0);
                         }
-                        break; // no need to check rest bits, since all sibling will be zero
+                        break;
+                    } else if !sibling.is_zero() {
+                        bitmap.set_bit(height);
                     }
                 }
             }
@@ -336,7 +338,7 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
                                 proof_results.push(MergeWithZero { base_node, zero_bits, zero_count});
                                 break;
                             }
-                        } else if leaves_bitmap[leaf_index].get_bit(height){
+                        } else if leaves_bitmap[leaf_index].get_bit(height) {
                             if !sibling.is_zero(){
                                 if sibling.is_shortcut() {
                                     proof.push(sibling.into_merge_with_zero::<H>());
