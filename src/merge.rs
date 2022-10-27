@@ -80,7 +80,7 @@ impl MergeValue {
                 if value.is_zero() {
                     return H256::zero();
                 }
-                self.to_mvz::<H>().hash::<H>()
+                self.into_merge_with_zero::<H>().hash::<H>()
             }
         }
     }
@@ -100,25 +100,20 @@ impl MergeValue {
         }
     }
 
-    pub fn to_mvz<H: Hasher + Default>(&self) -> MergeValue {
+    fn into_merge_with_zero<H: Hasher + Default>(&self) -> MergeValue {
         match self {
             MergeValue::ShortCut { key, value, height } => {
-
-
                 let base_key = key.parent_path(0);
-
                 let base_node = hash_base_node::<H>(0, &base_key, value);
-
                 let mut zero_bits = key.clone();
                 for i in *height..=core::u8::MAX {
                     if key.is_right(i) {
                         zero_bits.clear_bit(i);
                     }
                 }
-
                 MergeValue::MergeWithZero {
                     base_node,
-                    zero_bits: zero_bits,
+                    zero_bits,
                     zero_count: *height,
                 }
 
