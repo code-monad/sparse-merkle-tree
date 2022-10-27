@@ -109,16 +109,18 @@ impl<H: Hasher + Default, V: Value + PartialEq, S: StoreReadOps<V> + StoreWriteO
                                 // check definition of H256.fork_height()
                                 last_height = this_key.fork_height(&key);
 
+
+
                                 let (next_left, next_right) = if key.is_right(last_height) {
-                                    (
-                                        MergeValue::shortcut(this_key, val, last_height),
-                                        MergeValue::shortcut(key, node.hash::<H>(), last_height),
-                                    )
+                                        (
+                                            MergeValue::shortcut(this_key, val, last_height),
+                                            MergeValue::shortcut(key, node.hash::<H>(), last_height),
+                                        )
                                 } else {
-                                    (
-                                        MergeValue::shortcut(key, node.hash::<H>(), last_height),
-                                        MergeValue::shortcut(this_key, val, last_height),
-                                    )
+                                        (
+                                            MergeValue::shortcut(key, node.hash::<H>(), last_height),
+                                            MergeValue::shortcut(this_key, val, last_height),
+                                        )
                                 };
 
                                 let next_branch_key =
@@ -278,6 +280,9 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
                                 bitmap.clear_bit(core::u8::MAX - i);
                             }
                         }
+                        if !sibling.is_zero() {
+                            bitmap.set_bit(height);
+                        }
                         break; // no need to check rest bits, since all sibling will be zero
                     }
                 }
@@ -305,7 +310,7 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
                 let is_right = leaf_key.is_right(height);
 
                 // has non-zero sibling
-                if stack_top > 0 && stack_fork_height[stack_top - 1] == height {
+                if stack_top > 0 && stack_fork_height[stack_top - 1] == fork_height - height {
                     stack_top -= 1;
                 } else {
                     let parent_branch_key = BranchKey::new(height, parent_key);
@@ -316,17 +321,10 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
                             (parent_branch.right, parent_branch.left)
                         };
 
-                        if !sibling.is_zero(){
-                            let val = if sibling.is_shortcut() {
-                                sibling.into_merge_with_zero::<H>()
-                            } else {
-                                sibling
-                            };
-                            proof_results.push(val);
-                        } else if current.is_shortcut() {
+                        if current.is_shortcut() {
                             let base_node = current.base_node::<H>();
                             let mut zero_bits = leaf_key.clone();
-                            let mut zero_count = (core::u8::MAX - height);
+                            let mut zero_count = core::u8::MAX - height;
                             if zero_count < core::u8::MAX {
                                 zero_count += 1;
                             }
@@ -336,8 +334,15 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
                                     zero_bits.clear_bit(i);
                                 }
                             }
-                            proof_results.push(MergeWithZero { base_node, zero_bits, zero_count});
-                            break;
+
+                            if sibling.is_zero() {
+                                proof_results.push(MergeWithZero { base_node, zero_bits, zero_count});
+                                break;
+                            }
+                        } else if leaves_bitmap[leaf_index].get_bit(height){
+                            if !sibling.is_zero(){
+                                proof.push(sibling);
+                            }
                         }
                     } else {
                         // The key is not in the tree
