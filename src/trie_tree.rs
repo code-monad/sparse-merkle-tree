@@ -76,104 +76,117 @@ impl<H: Hasher + Default, V: Value + PartialEq, S: StoreReadOps<V> + StoreWriteO
                     (branch.left, branch.right)
                 };
 
-                if target.is_shortcut() {
-                    // this is a shortcut
-                    match target {
-                        MergeValue::ShortCut {
-                            key: this_key,
-                            value: val,
-                            height: h,
-                        } => {
-                            if this_key.eq(&key) {
-                                // we update its value
-                                let target = MergeValue::shortcut(key, node.hash::<H>(), h);
+                match target {
+                    MergeValue::ShortCut { key: this_key, value, height: h} => {
+                        if this_key.eq(&key) {
+                            // we update its value
+                            let target = MergeValue::shortcut(key, node.hash::<H>(), h);
 
-                                let new_branch = if key.is_right(last_height) {
-                                    BranchNode {
-                                        left: another,
-                                        right: target,
-                                    }
-                                } else {
-                                    BranchNode {
-                                        left: target,
-                                        right: another,
-                                    }
-                                };
-
-                                // update this shortcut's value
-                                self.store.insert_branch(branch_key, new_branch)?;
-                                break;
+                            let new_branch = if key.is_right(last_height) {
+                                BranchNode {
+                                    left: another,
+                                    right: target,
+                                }
                             } else {
-                                // we need to move this shortcut down
+                                BranchNode {
+                                    left: target,
+                                    right: another,
+                                }
+                            };
 
-                                // OPTIMIZATION: the shortcut must dropping to the level where [shortcut's new_height + 1] = [insert/delete key's shortcut height + 1]
-                                // check definition of H256.fork_height()
-                                last_height = this_key.fork_height(&key);
+                            // update this shortcut's value
+                            self.store.insert_branch(branch_key, new_branch)?;
+                            break;
+                        } else {
+                            // we need to move this shortcut down
+
+                            // OPTIMIZATION: the shortcut must dropping to the level where [shortcut's new_height + 1] = [insert/delete key's shortcut height + 1]
+                            // check definition of H256.fork_height()
+                            last_height = this_key.fork_height(&key);
 
 
-                                let (next_left, next_right) = if key.is_right(last_height) {
-                                    if last_height != 0 {
-                                        (
-                                            MergeValue::shortcut(this_key, val, last_height),
-                                            MergeValue::shortcut(key, node.hash::<H>(), last_height),
-                                        )
-                                    } else {
-                                        (
-                                            MergeValue::from_h256(val),
-                                            MergeValue::from_h256(node.hash::<H>())
-                                        )
-                                    }
+                            let (next_left, next_right) = if key.is_right(last_height) {
+                                if last_height != 0 {
+                                    (
+                                        MergeValue::shortcut(this_key, value, last_height),
+                                        MergeValue::shortcut(key, node.hash::<H>(), last_height),
+                                    )
                                 } else {
-                                    if last_height != 0 {
+                                    (
+                                        MergeValue::from_h256(value),
+                                        MergeValue::from_h256(node.hash::<H>())
+                                    )
+                                }
+                            } else {
+                                if last_height != 0 {
 
-                                        (
-                                            MergeValue::shortcut(key, node.hash::<H>(), last_height),
-                                            MergeValue::shortcut(this_key, val, last_height),
-                                        )
-                                    } else {
-                                        (
-                                            MergeValue::from_h256(node.hash::<H>()),
-                                            MergeValue::from_h256(val)
-                                        )
-                                    }
-                                };
+                                    (
+                                        MergeValue::shortcut(key, node.hash::<H>(), last_height),
+                                        MergeValue::shortcut(this_key, value, last_height),
+                                    )
+                                } else {
+                                    (
+                                        MergeValue::from_h256(node.hash::<H>()),
+                                        MergeValue::from_h256(value)
+                                    )
+                                }
+                            };
 
-                                let next_branch_key =
-                                    BranchKey::new(last_height, this_key.parent_path(last_height));
+                            let next_branch_key =
+                                BranchKey::new(last_height, this_key.parent_path(last_height));
 
-                                self.store.insert_branch(
-                                    next_branch_key,
-                                    BranchNode {
-                                        left: next_left,
-                                        right: next_right,
-                                    },
-                                )?;
-                                break; // go next round
-                            }
+                            self.store.insert_branch(
+                                next_branch_key,
+                                BranchNode {
+                                    left: next_left,
+                                    right: next_right,
+                                },
+                            )?;
+                            break; // go next round
                         }
-                        _ => unreachable!(),
+                    },
+                    MergeValue::Value(v) => {
+                        let insert_value = if last_height == 0 {
+                            node.clone()
+                        } else {
+                            MergeValue::shortcut(key, node.hash::<H>(), last_height)
+                        };
+                        let (left, right) = if key.is_right(last_height) {
+                            (another, insert_value)
+                        } else {
+                            (insert_value, another)
+                        };
+                        self.store
+                            .insert_branch(branch_key, BranchNode { left, right })?;
+                    },
+
+                    // TODO: FIXME
+                    MergeValue::MergeWithZero { base_node, zero_bits, zero_count} => {
+                        let insert_value = if last_height == 0 {
+                            node.clone()
+                        } else {
+                            MergeValue::shortcut(key, node.hash::<H>(), last_height)
+                        };
+                        let (left, right) = if key.is_right(last_height) {
+                            (another, insert_value)
+                        } else {
+                            (insert_value, another)
+                        };
+                        self.store
+                            .insert_branch(branch_key, BranchNode { left, right })?;
                     }
-                } else {
-                    let insert_value = if last_height == 0 {
-                        node.clone()
-                    } else {
-                        MergeValue::shortcut(key, node.hash::<H>(), last_height)
-                    };
-                    let (left, right) = if key.is_right(last_height) {
-                        (another, insert_value)
-                    } else {
-                        (insert_value, another)
-                    };
-                    self.store
-                        .insert_branch(branch_key, BranchNode { left, right })?;
                 }
             } else if !node.is_zero() {
-                // adds a shortcut here
-                let shortcut = MergeValue::shortcut(key, node.hash::<H>(), last_height);
-                let (left, right) = if key.is_right(last_height) {
-                    (MergeValue::zero(), shortcut)
+                let target_node = if last_height != 0 {
+                    // adds a shortcut here
+                   MergeValue::shortcut(key, node.hash::<H>(), last_height)
                 } else {
-                    (shortcut, MergeValue::zero())
+                    node
+                };
+                let (left, right) = if key.is_right(last_height) {
+                    (MergeValue::zero(), target_node)
+                } else {
+                    (target_node, MergeValue::zero())
                 };
                 self.store
                     .insert_branch(branch_key, BranchNode { left, right })?;
