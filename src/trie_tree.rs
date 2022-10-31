@@ -1,13 +1,7 @@
-use crate::{
-    branch::*,
-    error::{Error, Result},
-    merge::{merge, MergeValue},
-    merkle_proof::MerkleProof,
-    traits::{Hasher, StoreReadOps, StoreWriteOps, Value},
-    vec::Vec,
-    H256,
-};
+use crate::{branch::*, error::{Error, Result}, merge::{merge, MergeValue, hash_base_node}, merkle_proof::MerkleProof, traits::{Hasher, StoreReadOps, StoreWriteOps, Value}, vec::Vec, H256, MAX_STACK_SIZE};
 use core::marker::PhantomData;
+use std::thread::current;
+use crate::merge::MergeValue::MergeWithZero;
 
 /// Sparse merkle tree
 #[derive(Default, Debug)]
@@ -54,7 +48,7 @@ impl<H, V, S: StoreReadOps<V>> SparseMerkleTree<H, V, S> {
 }
 
 impl<H: Hasher + Default, V: Value + PartialEq, S: StoreReadOps<V> + StoreWriteOps<V>>
-    SparseMerkleTree<H, V, S>
+SparseMerkleTree<H, V, S>
 {
     /// Update a leaf, return new merkle root
     /// set to zero value to delete a key
@@ -110,10 +104,10 @@ impl<H: Hasher + Default, V: Value + PartialEq, S: StoreReadOps<V> + StoreWriteO
                         } else {
                             // we need to move this shortcut down
 
+
                             // OPTIMIZATION: the shortcut must dropping to the level where [shortcut's new_height + 1] = [insert/delete key's shortcut height + 1]
                             // check definition of H256.fork_height()
                             last_height = this_key.fork_height(&key);
-
                             let (next_left, next_right) = if key.is_right(last_height) {
                                 (
                                     MergeValue::shortcut(this_key, val, last_height),
@@ -260,12 +254,122 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
 
         // Collect leaf bitmaps
         let mut leaves_bitmap: Vec<H256> = Default::default();
-        let mut proof: Vec<MergeValue> = Default::default();
         for current_key in &keys {
             let mut bitmap = H256::zero();
-            for height in (0..=core::u8::MAX).rev() {}
+            for height in (0..=core::u8::MAX).rev() {
+                let parent_key = current_key.parent_path(height);
+                let parent_branch_key = BranchKey::new(height, parent_key);
+                if let Some(parent_branch) = self.store.get_branch(&parent_branch_key)? {
+                    let (sibling, target) = if current_key.is_right(height) {
+                        (parent_branch.left, parent_branch.right)
+                    } else {
+                        (parent_branch.right, parent_branch.left)
+                    };
 
+                    if target.is_shortcut() {
+                        if !sibling.is_zero() {
+                            bitmap.set_bit(height);
+                        } else if height != 0 {
+                            bitmap.set_bit((core::u8::MAX - height).wrapping_add(1));
+                        } else {
+                            bitmap = current_key.clone();
+                            bitmap.clear_bit(0);
+                        }
+                        break;
+                    } else if !sibling.is_zero() {
+                        bitmap.set_bit(height);
+                    }
+                }
+            }
             leaves_bitmap.push(bitmap);
+        }
+
+        let mut proof: Vec<MergeValue> = Default::default();
+        let mut stack_fork_height = [0u8; MAX_STACK_SIZE]; // store fork height
+        let mut stack_top = 0;
+        let mut leaf_index = 0;
+
+        while leaf_index < keys.len() {
+            let leaf_key = keys[leaf_index];
+            let fork_height = if leaf_index + 1 < keys.len() {
+                leaf_key.fork_height(&keys[leaf_index + 1])
+            } else {
+                core::u8::MAX
+            };
+
+            let mut proof_results = Vec::default();
+
+            for height in (0..=fork_height).rev() {
+                let parent_key = leaf_key.parent_path(height);
+                let is_right = leaf_key.is_right(height);
+
+                // has non-zero sibling
+                if stack_top > 0 && stack_fork_height[stack_top - 1] == fork_height - height {
+                    stack_top -= 1;
+                } else {
+                    let parent_branch_key = BranchKey::new(height, parent_key);
+                    if let Some(parent_branch) = self.store.get_branch(&parent_branch_key)? {
+                        let (sibling, current) = if is_right {
+                            (parent_branch.left, parent_branch.right)
+                        } else {
+                            (parent_branch.right, parent_branch.left)
+                        };
+
+                        match current {
+                            MergeValue::ShortCut { key, value, height } => {
+                                let base_key = key.parent_path(0);
+                                if sibling.is_zero() {
+                                    proof_results.push(MergeWithZero { base_node: hash_base_node::<H>(0, &base_key, &value), zero_bits: key, zero_count: height });
+                                    break;
+                                }
+                            }
+                            _ => {
+                                if leaves_bitmap[leaf_index].get_bit(height) {
+                                    if height != 0 {
+                                        if !matches!(sibling, MergeValue::ShortCut { .. }) {
+                                            proof.push(sibling.clone());
+                                        }
+                                    } else {
+                                        proof.push(sibling.clone());
+                                    }
+
+                                    if !sibling.is_zero() {
+                                        match sibling {
+                                            MergeValue::ShortCut { key, value, height } => {
+                                                if height != 0 {
+                                                    let base_key = key.parent_path(0);
+                                                    let base_node = hash_base_node::<H>(0, &base_key, &value);
+                                                    let zero_bits = key;
+                                                    proof.push(MergeValue::MergeWithZero {
+                                                        base_node,
+                                                        zero_bits: key,
+                                                        zero_count: height,
+                                                    });
+                                                }  else {
+                                                    proof.push(sibling.clone());
+                                                }
+                                            },
+                                            _ => {
+                                                proof.push(sibling.clone());
+                                            }
+                                        }
+
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        // The key is not in the tree
+                    }
+                }
+            }
+
+            proof_results.reverse();
+            proof.append(&mut proof_results);
+            debug_assert!(stack_top < MAX_STACK_SIZE);
+            stack_fork_height[stack_top] = fork_height;
+            stack_top += 1;
+            leaf_index += 1;
         }
 
         Ok(MerkleProof::new(leaves_bitmap, proof))
