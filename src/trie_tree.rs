@@ -161,6 +161,7 @@ impl<H: Hasher + Default, V: Value + PartialEq, S: StoreReadOps<V> + StoreWriteO
                     },
 
                     // TODO: FIXME
+                    // Move this node down like a shortcut
                     MergeValue::MergeWithZero { base_node, zero_bits, zero_count} => {
                         let insert_value = if last_height == 0 {
                             node.clone()
