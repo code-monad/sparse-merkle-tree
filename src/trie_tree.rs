@@ -163,18 +163,8 @@ impl<H: Hasher + Default, V: Value + PartialEq, S: StoreReadOps<V> + StoreWriteO
                     // TODO: FIXME
                     // Move this node down like a shortcut
                     MergeValue::MergeWithZero { base_node, zero_bits, zero_count} => {
-                        let insert_value = if last_height == 0 {
-                            node.clone()
-                        } else {
-                            MergeValue::shortcut(key, node.hash::<H>(), last_height)
-                        };
-                        let (left, right) = if key.is_right(last_height) {
-                            (another, insert_value)
-                        } else {
-                            (insert_value, another)
-                        };
-                        self.store
-                            .insert_branch(branch_key, BranchNode { left, right })?;
+                        last_height = last_height - zero_count;
+                        continue;
                     }
                 }
             } else if !node.is_zero() {
