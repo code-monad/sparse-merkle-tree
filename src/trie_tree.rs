@@ -111,17 +111,31 @@ impl<H: Hasher + Default, V: Value + PartialEq, S: StoreReadOps<V> + StoreWriteO
                                 last_height = this_key.fork_height(&key);
 
 
-
                                 let (next_left, next_right) = if key.is_right(last_height) {
+                                    if last_height != 0 {
                                         (
                                             MergeValue::shortcut(this_key, val, last_height),
                                             MergeValue::shortcut(key, node.hash::<H>(), last_height),
                                         )
+                                    } else {
+                                        (
+                                            MergeValue::from_h256(val),
+                                            MergeValue::from_h256(node.hash::<H>())
+                                        )
+                                    }
                                 } else {
+                                    if last_height != 0 {
+
                                         (
                                             MergeValue::shortcut(key, node.hash::<H>(), last_height),
                                             MergeValue::shortcut(this_key, val, last_height),
                                         )
+                                    } else {
+                                        (
+                                            MergeValue::from_h256(node.hash::<H>()),
+                                            MergeValue::from_h256(val)
+                                        )
+                                    }
                                 };
 
                                 let next_branch_key =
@@ -271,18 +285,24 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
                         (parent_branch.right, parent_branch.left)
                     };
 
-                    if target.is_shortcut() {
-                        if !sibling.is_zero()  {
-                            bitmap.set_bit(height);
-                        } else if height != 0 {
-                            bitmap.set_bit((core::u8::MAX - height).wrapping_add(1));
-                        } else {
-                            bitmap = current_key.clone();
-                            bitmap.clear_bit(0);
+                    match target {
+                        MergeValue::ShortCut { key, value, height} => {
+                            if !sibling.is_zero()  {
+                                bitmap.set_bit(height);
+                            } else if height != 0 {
+                                bitmap.set_bit((core::u8::MAX - height).wrapping_add(1));
+                            }
+                            break;
+                        },
+                        _ => {
+                            if !sibling.is_zero() {
+                                bitmap.set_bit(height);
+                            } else if height == 1 {
+                                if matches!(target, MergeValue::Value(_)) && current_key.get_bit(height) {
+                                    bitmap.set_bit(height);
+                                }
+                            }
                         }
-                        break;
-                    } else if !sibling.is_zero() {
-                        bitmap.set_bit(height);
                     }
                 }
             }
@@ -337,15 +357,6 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
                             if sibling.is_zero() {
                                 proof_results.push(MergeWithZero { base_node, zero_bits, zero_count});
                                 break;
-                            }
-                        } else if leaves_bitmap[leaf_index].get_bit(height) {
-                            if !sibling.is_zero(){
-                                if sibling.is_shortcut() && height != 0 {
-                                    proof.push(sibling.into_merge_with_zero::<H>());
-                                } else {
-                                    proof.push(sibling);
-                                }
-
                             }
                         }
                     } else {
