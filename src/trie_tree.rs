@@ -63,7 +63,7 @@ impl<H: Hasher + Default, V: Value + PartialEq, S: StoreReadOps<V> + StoreWriteO
         }
 
         let mut last_height = core::u8::MAX;
-        while last_height > 0 {
+        while last_height >= 0 {
             // walk from top to bottom
             let node_key = key.parent_path(last_height);
             let branch_key = BranchKey::new(last_height, node_key); // this represents a position in the tree
@@ -145,26 +145,26 @@ impl<H: Hasher + Default, V: Value + PartialEq, S: StoreReadOps<V> + StoreWriteO
                             break; // go next round
                         }
                     },
-                    MergeValue::Value(v) => {
-                        let insert_value = if last_height == 0 {
-                            node.clone()
+                    _ => {
+                        if target.is_zero() || last_height == 0 {
+                            let insert_value = if last_height == 0 {
+                                node.clone()
+                            } else {
+                                MergeValue::shortcut(key, node.hash::<H>(), last_height)
+                            };
+                            let (left, right) = if key.is_right(last_height) {
+                                (another, insert_value)
+                            } else {
+                                (insert_value, another)
+                            };
+                            self.store
+                                .insert_branch(branch_key, BranchNode { left, right })?;
+                            break;
                         } else {
-                            MergeValue::shortcut(key, node.hash::<H>(), last_height)
-                        };
-                        let (left, right) = if key.is_right(last_height) {
-                            (another, insert_value)
-                        } else {
-                            (insert_value, another)
-                        };
-                        self.store
-                            .insert_branch(branch_key, BranchNode { left, right })?;
-                    },
-
-                    // TODO: FIXME
-                    // Move this node down like a shortcut
-                    MergeValue::MergeWithZero { base_node, zero_bits, zero_count} => {
-                        last_height = last_height - zero_count;
-                        continue;
+                            // walk down
+                            last_height -= 1;
+                            continue;
+                        }
                     }
                 }
             } else if !node.is_zero() {
@@ -182,8 +182,13 @@ impl<H: Hasher + Default, V: Value + PartialEq, S: StoreReadOps<V> + StoreWriteO
                 self.store
                     .insert_branch(branch_key, BranchNode { left, right })?;
                 break; // stop walking
-            } // do nothing with a zero insertion
-            last_height -= 1;
+            } else {
+                if last_height != 0 {
+                    last_height -= 1;
+                } else { // do nothing with a zero insertion
+                    break;
+                }
+            }
         }
 
         for height in last_height..=core::u8::MAX {
