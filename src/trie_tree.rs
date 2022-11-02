@@ -1,4 +1,4 @@
-use crate::{branch::*, error::{Error, Result}, merge::{merge, MergeValue}, merkle_proof::MerkleProof, traits::{Hasher, StoreReadOps, StoreWriteOps, Value}, vec::Vec, H256, MAX_STACK_SIZE};
+use crate::{branch::*, error::{Error, Result}, merge::{merge, MergeValue}, merkle_proof::MerkleProof, traits::{Hasher, StoreReadOps, StoreWriteOps, Value}, vec::Vec, H256, MAX_STACK_SIZE, merge};
 use core::marker::PhantomData;
 use std::thread::current;
 use crate::merge::MergeValue::MergeWithZero;
@@ -349,23 +349,41 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
                             (parent_branch.right, parent_branch.left)
                         };
 
-                        if current.is_shortcut() {
-                            let base_node = current.base_node::<H>();
-                            let mut zero_bits = leaf_key.clone();
-                            let mut zero_count = core::u8::MAX - height;
-                            if zero_count < core::u8::MAX {
-                                zero_count += 1;
-                            }
-
-                            for i in zero_count..=core::u8::MAX {
-                                if leaf_key.is_right(i) {
-                                    zero_bits.clear_bit(i);
+                        match current {
+                            MergeValue::ShortCut { key, value, height: _ } => {
+                                if !key.eq(&leaf_key) {
+                                    if leaves_bitmap[leaf_index].get_bit(height) && leaf_index + 1 == keys.len() {
+                                        proof_results.push(MergeValue::from_h256(value));
+                                    }
+                                    proof_results.push(MergeValue::shortcut(key, value, (core::u8::MAX - height).wrapping_add(1) ).into_merge_with_zero::<H>());
+                                } else if !sibling.is_zero() && height != fork_height {
+                                    proof_results.push(sibling);
                                 }
-                            }
-
-                            if sibling.is_zero() {
-                                proof_results.push(MergeWithZero { base_node, zero_bits, zero_count});
-                                break;
+                            },
+                            MergeValue::Value(_) => {
+                                if (height != 0 || leaf_index + 1 == keys.len()) && !sibling.is_zero() {
+                                    if sibling.is_shortcut() {
+                                        proof_results.push(sibling.into_merge_with_zero::<H>());
+                                    } else {
+                                        if leaves_bitmap[leaf_index].get_bit(height) && leaf_index + 1 == keys.len(){
+                                            proof_results.push(sibling);
+                                        }
+                                    }
+                                }
+                            },
+                            MergeValue::MergeWithZero { .. } => {
+                                match sibling {
+                                    MergeValue::ShortCut { .. } => {
+                                        if leaf_index + 1 == keys.len() {
+                                            proof_results.push(sibling.into_merge_with_zero::<H>());
+                                        }
+                                    },
+                                    _ => {
+                                        if !sibling.is_zero() {
+                                            proof_results.push(sibling);
+                                        }
+                                    }
+                                }
                             }
                         }
                     } else {
@@ -376,13 +394,13 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
             }
 
             proof_results.reverse();
+            //println!("proof results: {:?}", proof_results);
             proof.append(&mut proof_results);
             debug_assert!(stack_top < MAX_STACK_SIZE);
             stack_fork_height[stack_top] = fork_height;
             stack_top += 1;
             leaf_index += 1;
         }
-
         Ok(MerkleProof::new(leaves_bitmap, proof))
     }
 }
