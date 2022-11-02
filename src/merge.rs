@@ -180,7 +180,7 @@ pub fn merge<H: Hasher + Default>(
     MergeValue::Value(hasher.finish())
 }
 
-fn merge_with_zero<H: Hasher + Default>(
+pub fn merge_with_zero<H: Hasher + Default>(
     height: u8,
     node_key: &H256,
     value: &MergeValue,
