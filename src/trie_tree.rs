@@ -335,25 +335,37 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
                 core::u8::MAX
             };
 
-            let mut proof_results = Vec::default();
-
             let mut skip_height = Vec::new();
             for height in 0..=fork_height {
                 if stack_top > 0 && stack_fork_height[stack_top - 1] == height {
                     stack_top -= 1;
                     skip_height.push(height);
                 }
+                if stack_top == 0 {
+                    break;
+                }
+            }
+
+            let mut skiped_height = Vec::new();
+            for height in 0..=fork_height {
+                if stack_top > 0 && stack_fork_height[stack_top - 1] == height {
+                    stack_top -= 1;
+                    skiped_height.push(height);
+                }
             }
 
 
+            let mut proof_result = Vec::new();
             for height in (0..=fork_height).rev() {
+                if height == fork_height && leaf_index + 1 < keys.len() {
+                    // If it's not final round, we don't need to merge to root (height=255)
+                    continue;
+                }
                 if skip_height.contains(&height) {
                     continue;
                 }
                 let parent_key = leaf_key.parent_path(height);
                 let is_right = leaf_key.is_right(height);
-
-
                 let parent_branch_key = BranchKey::new(height, parent_key);
                 if let Some(parent_branch) = self.store.get_branch(&parent_branch_key)? {
                     let (sibling, current) = if is_right {
@@ -363,48 +375,46 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
                     };
 
                     match current {
-                        MergeValue::ShortCut { key, value, height: _ } => {
-                            if !key.eq(&leaf_key) {
-                                //proof_results.push(MergeValue::from_h256(value));
-                                proof_results.push(MergeValue::shortcut(key, value, (core::u8::MAX - height).wrapping_add(1)).into_merge_with_zero::<H>());
-                            } else if !sibling.is_zero() && height != fork_height {
-                                proof_results.push(sibling);
+                        MergeValue::ShortCut { key, value, height } => {
+                            if !key.eq(&leaf_key) { // this means key does not exist
+                                if leaves_bitmap[leaf_index].get_bit(0) {
+                                    proof_result.push(sibling);
+                                }
+                            } else if leaves_bitmap[leaf_index].get_bit(height){
+                                if sibling.is_shortcut() {
+                                    proof_result.push(sibling.into_merge_with_zero::<H>());
+                                } else {
+                                    proof_result.push(sibling);
+                                }
                             }
                             break;
-                        }
-                        MergeValue::Value(_) => {
-                            if (height != 0 || leaf_index + 1 == keys.len()) && !sibling.is_zero() {
+                        },
+                        MergeValue::MergeWithZero {zero_count, .. } => {
+                            if !sibling.is_zero() && leaves_bitmap[leaf_index].get_bit(height){
                                 if sibling.is_shortcut() {
-                                    proof_results.push(sibling.into_merge_with_zero::<H>());
+                                    proof_result.push(sibling.into_merge_with_zero::<H>());
                                 } else {
-                                    if leaves_bitmap[leaf_index].get_bit(height) {
-                                        proof_results.push(sibling);
-                                    }
+                                    proof_result.push(sibling);
                                 }
                             }
                         }
-                        MergeValue::MergeWithZero { .. } => {
-                            match sibling {
-                                MergeValue::ShortCut { .. } => {
-                                    if leaf_index + 1 == keys.len() {
-                                        proof_results.push(sibling.into_merge_with_zero::<H>());
-                                    }
-                                }
-                                _ => {
-                                    if !sibling.is_zero() && leaves_bitmap[leaf_index].get_bit(height){
-                                        proof_results.push(sibling);
+                        MergeValue::Value(_) => {
+                            if !sibling.is_zero() && leaves_bitmap[leaf_index].get_bit(height){
+                                if sibling.is_shortcut(){
+                                    proof_result.push(sibling.into_merge_with_zero::<H>());
+                                } else if  core::u8::MAX - height != fork_height {}  {
+                                    if !(height == 0 && proof_result.is_empty()) {
+                                        proof_result.push(sibling);
                                     }
                                 }
                             }
                         }
                     }
-                } else {
-                    // The key is not in the tree
                 }
             }
 
-            proof_results.reverse();
-            proof.append(&mut proof_results);
+            proof_result.reverse();
+            proof.append(&mut proof_result);
             debug_assert!(stack_top < MAX_STACK_SIZE);
             stack_fork_height[stack_top] = fork_height;
             stack_top += 1;
