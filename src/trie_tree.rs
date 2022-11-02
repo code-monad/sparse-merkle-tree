@@ -296,11 +296,16 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
 
                     match target {
                         MergeValue::ShortCut { key, value, height} => {
-                            if !sibling.is_zero()  {
-                                bitmap.set_bit(height);
-                            } else if height != 0 {
-                                bitmap.set_bit((core::u8::MAX - height).wrapping_add(1));
+                            if key.eq(current_key) {
+                                if !sibling.is_zero()  {
+                                    bitmap.set_bit(height);
+                                } else if height != 0 {
+                                    bitmap.set_bit((core::u8::MAX - height).wrapping_add(1));
+                                }
+                            } else {
+                                bitmap.set_bit(1);
                             }
+
                             break;
                         },
                         _ => {
