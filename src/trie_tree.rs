@@ -376,7 +376,7 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
 
                     match current {
                         MergeValue::ShortCut { key, value, height } => {
-                            if !key.eq(&leaf_key) { // this means key does not exist
+                            if !key.eq(&leaf_key) { // this means key does not exist // FIXME!
                                 if leaves_bitmap[leaf_index].get_bit(1) {
                                     let insert_value = MergeValue::shortcut(key, value, 1).into_merge_with_zero::<H>();
                                     proof_result.push(insert_value);
@@ -416,9 +416,7 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
                                         proof_result.push(sibling.into_merge_with_zero::<H>());
                                     } ,
                                     _ => {
-                                        if !(height == 0 && proof_result.is_empty())  || (height == core::u8::MAX) {
-                                            proof_result.push(sibling);
-                                        }
+                                        proof_result.push(sibling);
                                     }
                                 }
                             }
