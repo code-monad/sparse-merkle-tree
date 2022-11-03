@@ -80,7 +80,7 @@ SparseMerkleTree<H, V, S>
                 match target {
                     MergeValue::ShortCut {
                         key: this_key,
-                        value: val,
+                        value,
                         height: h,
                     } => {
                         if this_key.eq(&key) {
