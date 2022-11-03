@@ -78,7 +78,11 @@ SparseMerkleTree<H, V, S>
                 };
 
                 match target {
-                    MergeValue::ShortCut { key: this_key, value, height: h } => {
+                    MergeValue::ShortCut {
+                        key: this_key,
+                        value: val,
+                        height: h,
+                    } => {
                         if this_key.eq(&key) {
                             // we update its value
                             let target = MergeValue::shortcut(key, node.hash::<H>(), h);
@@ -104,7 +108,6 @@ SparseMerkleTree<H, V, S>
                             // OPTIMIZATION: the shortcut must dropping to the level where [shortcut's new_height + 1] = [insert/delete key's shortcut height + 1]
                             // check definition of H256.fork_height()
                             last_height = this_key.fork_height(&key);
-
 
                             let (next_left, next_right) = if key.is_right(last_height) {
                                 if last_height != 0 {
