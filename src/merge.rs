@@ -70,13 +70,17 @@ impl MergeValue {
             MergeValue::ShortCut {
                 key: _,
                 value,
-                height: _,
+                height,
             } => {
                 // try keep hash same with MergeWithZero
                 if value.is_zero() {
                     return H256::zero();
                 }
-                self.into_merge_with_zero::<H>().hash::<H>()
+                if *height == 0 {
+                    *value
+                } else {
+                    self.into_merge_with_zero::<H>().hash::<H>()
+                }
             }
         }
     }
@@ -100,7 +104,7 @@ impl MergeValue {
         }
     }
 
-    fn into_merge_with_zero<H: Hasher + Default>(&self) -> MergeValue {
+    pub fn into_merge_with_zero<H: Hasher + Default>(&self) -> MergeValue {
         match self {
             MergeValue::ShortCut { key, value, height } => {
                 let base_key = key.parent_path(0);
@@ -169,7 +173,7 @@ pub fn merge<H: Hasher + Default>(
     MergeValue::Value(hasher.finish())
 }
 
-fn merge_with_zero<H: Hasher + Default>(
+pub fn merge_with_zero<H: Hasher + Default>(
     height: u8,
     node_key: &H256,
     value: &MergeValue,
