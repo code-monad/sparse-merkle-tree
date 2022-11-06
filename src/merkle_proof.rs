@@ -104,8 +104,7 @@ impl MerkleProof {
                                 buffer.extend_from_slice(zero_bits.as_slice());
                                 (Some(0x51), Some(buffer))
                             }
-                            _ =>  unreachable!()
-
+                            _ => unreachable!(),
                         }
                     } else {
                         zero_count += 1;
