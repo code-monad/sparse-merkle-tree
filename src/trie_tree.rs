@@ -309,28 +309,19 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
 
                     match target {
                         MergeValue::ShortCut { key, height: h, .. } => {
-                            if key.eq(current_key) {
-                                if !sibling.is_zero() {
-                                    bitmap.set_bit(h);
-                                }
-                            } else if sibling.is_shortcut() {
+                            if !sibling.is_zero() {
                                 bitmap.set_bit(height);
-                                bitmap.set_bit(h.wrapping_sub(1));
-                            } else {
-                                // non exits, but we should set the bit
-                                bitmap.set_bit(1);
+                            }
+                            if !key.eq(current_key){
+                                let fork_height = key.fork_height(current_key);
+
+                                bitmap.set_bit(fork_height);
+                                break;
                             }
                         }
                         _ => {
                             if !sibling.is_zero() {
                                 bitmap.set_bit(height);
-                            } else if height == 1 {
-                                if matches!(target, MergeValue::Value(_))
-                                    && current_key.get_bit(height)
-                                    && !sibling.is_zero()
-                                {
-                                    bitmap.set_bit(height);
-                                }
                             }
                         }
                     }
