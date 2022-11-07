@@ -354,14 +354,6 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
                 }
             }
 
-            let mut skiped_height = Vec::new();
-            for height in 0..=fork_height {
-                if stack_top > 0 && stack_fork_height[stack_top - 1] == height {
-                    stack_top -= 1;
-                    skiped_height.push(height);
-                }
-            }
-
             let mut proof_result = Vec::new();
             for height in (0..=fork_height).rev() {
                 if height == fork_height && leaf_index + 1 < keys.len() {
@@ -383,32 +375,27 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
 
                     match current {
                         MergeValue::ShortCut { key, value, height } => {
+                            if leaves_bitmap[leaf_index].get_bit(height) {
+                                if !sibling.is_zero() {
+                                    if sibling.is_shortcut() {
+                                        proof_result.push(sibling.into_merge_with_zero::<H>());
+                                    } else {
+                                        proof_result.push(sibling);
+                                    }
+                                }
+                            }
+
                             if !key.eq(&leaf_key) {
                                 // this means key does not exist // FIXME!
-                                if leaves_bitmap[leaf_index].get_bit(1) {
-                                    let insert_value = MergeValue::shortcut(key, value, 1)
-                                        .into_merge_with_zero::<H>();
-                                    proof_result.push(insert_value);
-                                } else if leaves_bitmap[leaf_index].get_bit(height) {
-                                    if !sibling.is_zero() {
-                                        if sibling.is_shortcut() {
-                                            proof_result.push(sibling.into_merge_with_zero::<H>());
-                                        } else {
-                                            proof_result.push(sibling);
-                                        }
-                                    }
-                                    proof_result.push(
-                                        MergeValue::shortcut(key, value, height.wrapping_sub(1))
-                                            .into_merge_with_zero::<H>(),
-                                    );
+                                let fork_height = key.fork_height(&leaf_key);
+                                if leaves_bitmap[leaf_index].get_bit(fork_height) && !skip_height.contains(&fork_height){
+                                    proof_result.push(MergeValue::shortcut(key, value, fork_height).into_merge_with_zero::<H>());
                                 }
-                            } else if leaves_bitmap[leaf_index].get_bit(height) {
-                                if sibling.is_shortcut() {
-                                    proof_result.push(sibling.into_merge_with_zero::<H>());
-                                } else {
-                                    proof_result.push(sibling);
+
+                                if fork_height == 1 && leaves_bitmap[leaf_index].get_bit(0) {
+                                    proof_result.push(MergeValue::from_h256(value));
                                 }
-                            } else {
+
                             }
                             break;
                         }
