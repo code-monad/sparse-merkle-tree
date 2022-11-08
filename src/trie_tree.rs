@@ -355,7 +355,7 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
             }
 
             let mut proof_result = Vec::new();
-            let mut started = false;
+            let mut inserted_index = Vec::new();
             for height in (0..=fork_height).rev() {
                 if height == fork_height && leaf_index + 1 < keys.len() {
                     // If it's not final round, we don't need to merge to root (height=255)
@@ -364,20 +364,40 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
                 if skip_height.contains(&height) {
                     continue;
                 }
-                let parent_key = leaf_key.parent_path(height);
-                let is_right = leaf_key.is_right(height);
-                let parent_branch_key = BranchKey::new(height, parent_key);
-                if let Some(parent_branch) = self.store.get_branch(&parent_branch_key)? {
-                    started = true;
-                    let (sibling, current) = if is_right {
-                        (parent_branch.left, parent_branch.right)
-                    } else {
-                        (parent_branch.right, parent_branch.left)
-                    };
+                if leaves_bitmap[leaf_index].get_bit(height) {
+                    let parent_key = leaf_key.parent_path(height);
+                    let is_right = leaf_key.is_right(height);
+                    let parent_branch_key = BranchKey::new(height, parent_key);
+                    if let Some(parent_branch) = self.store.get_branch(&parent_branch_key)? {
+                        let (sibling, current) = if is_right {
+                            (parent_branch.left, parent_branch.right)
+                        } else {
+                            (parent_branch.right, parent_branch.left)
+                        };
 
-                    match current {
-                        MergeValue::ShortCut { key, value, height } => {
-                            if leaves_bitmap[leaf_index].get_bit(height) {
+                        match current {
+                            MergeValue::ShortCut { key, value, height } => {
+                                if !sibling.is_zero() {
+                                    if sibling.is_shortcut() {
+                                        proof_result.push(sibling.into_merge_with_zero::<H>());
+                                    } else {
+                                        proof_result.push(sibling);
+                                    }
+                                }
+                                if !key.eq(&leaf_key) {
+                                    // this means key does not exist // FIXME!
+                                    let fork_height = key.fork_height(&leaf_key);
+                                    if leaves_bitmap[leaf_index].get_bit(fork_height) && !skip_height.contains(&fork_height) {
+                                        proof_result.push(MergeValue::shortcut(key, value, fork_height).into_merge_with_zero::<H>());
+                                    }
+
+                                    if fork_height == 1 && leaves_bitmap[leaf_index].get_bit(0) {
+                                        proof_result.push(MergeValue::from_h256(value));
+                                    }
+                                }
+                                break;
+                            }
+                            MergeValue::MergeWithZero { zero_count, .. } => {
                                 if !sibling.is_zero() {
                                     if sibling.is_shortcut() {
                                         proof_result.push(sibling.into_merge_with_zero::<H>());
@@ -386,84 +406,50 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
                                     }
                                 }
                             }
-
-                            if !key.eq(&leaf_key) {
-                                // this means key does not exist // FIXME!
-                                let fork_height = key.fork_height(&leaf_key);
-                                if leaves_bitmap[leaf_index].get_bit(fork_height) && !skip_height.contains(&fork_height){
-                                    proof_result.push(MergeValue::shortcut(key, value, fork_height).into_merge_with_zero::<H>());
-                                }
-
-                                if fork_height == 1 && leaves_bitmap[leaf_index].get_bit(0) {
-                                    proof_result.push(MergeValue::from_h256(value));
-                                }
-
-                            }
-                            break;
-                        }
-                        MergeValue::MergeWithZero { zero_count, .. } => {
-                            if !sibling.is_zero() && leaves_bitmap[leaf_index].get_bit(height) {
-                                if sibling.is_shortcut() {
-                                    proof_result.push(sibling.into_merge_with_zero::<H>());
-                                } else {
-                                    proof_result.push(sibling);
-                                }
-                            }
-                        }
-                        MergeValue::Value(_) => {
-                            if !sibling.is_zero() && leaves_bitmap[leaf_index].get_bit(height) {
-                                match sibling {
-                                    MergeValue::ShortCut { .. } => {
-                                        proof_result.push(sibling.into_merge_with_zero::<H>());
-                                    }
-                                    _ => {
-                                        proof_result.push(sibling);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } else if !started {
-                    for i in height..=fork_height {
-                        let parent_key = leaf_key.parent_path(i);
-                        let is_right = leaf_key.is_right(i);
-                        let parent_branch_key = BranchKey::new(i, parent_key);
-                        if let Some(parent_branch) = self.store.get_branch(&parent_branch_key)? {
-                            let (sibling, current) = if is_right {
-                                (parent_branch.left, parent_branch.right)
-                            } else {
-                                (parent_branch.right, parent_branch.left)
-                            };
-
-                            match current {
-                                MergeValue::ShortCut { key, value, height} => {
-                                    if !key.eq(&leaf_key) {
-                                        let fork_height_i = key.fork_height(&leaf_key);
-
-                                        let insert_value = MergeValue::shortcut(key, value, fork_height_i).into_merge_with_zero::<H>();
-                                        if leaves_bitmap[leaf_index].get_bit(fork_height_i) && !skip_height.contains(&fork_height_i) && fork_height_i < fork_height{
-                                            proof_result.push(insert_value);
-                                        }
-
-                                        if fork_height == 1 && leaves_bitmap[leaf_index].get_bit(0) {
-                                            proof_result.push(MergeValue::from_h256(value));
-                                        }
-                                    }
-                                },
-                                _ => {
-                                    if !current.is_zero() &&leaves_bitmap[leaf_index].get_bit(i) && !sibling.is_zero() {
-                                        if sibling.is_shortcut() {
+                            MergeValue::Value(_) => {
+                                if !sibling.is_zero() {
+                                    match sibling {
+                                        MergeValue::ShortCut { .. } => {
                                             proof_result.push(sibling.into_merge_with_zero::<H>());
-                                        } else {
+                                        }
+                                        _ => {
                                             proof_result.push(sibling);
                                         }
                                     }
                                 }
                             }
-                            break;
+                        }
+                    }  else if !inserted_index.contains(&height) {
+                        // find from up to down
+                        for i in (height..=core::u8::MAX).rev() {
+                            let parent_key = leaf_key.parent_path(i);
+                            let is_right = leaf_key.is_right(i);
+                            let parent_branch_key = BranchKey::new(i, parent_key);
+                            if let Some(parent_branch) = self.store.get_branch(&parent_branch_key)? {
+                                let (sibling, current) = if is_right {
+                                    (parent_branch.left, parent_branch.right)
+                                } else {
+                                    (parent_branch.right, parent_branch.left)
+                                };
+
+                                match current {
+                                    MergeValue::ShortCut { key, value, height:h} => {
+                                        if !key.eq(&leaf_key) {
+                                            let fork_at = key.fork_height(&leaf_key);
+                                            if fork_at == height {
+                                                let insert_value = MergeValue::shortcut(key, value, height).into_merge_with_zero::<H>();
+                                                proof_result.push(insert_value);
+                                            }
+                                        }
+                                    },
+                                    _ => {
+                                        continue;
+                                    }
+                                }
+
+                            }
                         }
                     }
-                    break;
                 }
             }
 
