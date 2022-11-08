@@ -355,6 +355,7 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
             }
 
             let mut proof_result = Vec::new();
+            let mut started = false;
             for height in (0..=fork_height).rev() {
                 if height == fork_height && leaf_index + 1 < keys.len() {
                     // If it's not final round, we don't need to merge to root (height=255)
@@ -367,6 +368,7 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
                 let is_right = leaf_key.is_right(height);
                 let parent_branch_key = BranchKey::new(height, parent_key);
                 if let Some(parent_branch) = self.store.get_branch(&parent_branch_key)? {
+                    started = true;
                     let (sibling, current) = if is_right {
                         (parent_branch.left, parent_branch.right)
                     } else {
@@ -421,6 +423,47 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
                             }
                         }
                     }
+                } else if !started {
+                    for i in height..=fork_height {
+                        let parent_key = leaf_key.parent_path(i);
+                        let is_right = leaf_key.is_right(i);
+                        let parent_branch_key = BranchKey::new(i, parent_key);
+                        if let Some(parent_branch) = self.store.get_branch(&parent_branch_key)? {
+                            let (sibling, current) = if is_right {
+                                (parent_branch.left, parent_branch.right)
+                            } else {
+                                (parent_branch.right, parent_branch.left)
+                            };
+
+                            match current {
+                                MergeValue::ShortCut { key, value, height} => {
+                                    if !key.eq(&leaf_key) {
+                                        let fork_height_i = key.fork_height(&leaf_key);
+
+                                        let insert_value = MergeValue::shortcut(key, value, fork_height_i).into_merge_with_zero::<H>();
+                                        if leaves_bitmap[leaf_index].get_bit(fork_height_i) && !skip_height.contains(&fork_height_i) && fork_height_i < fork_height{
+                                            proof_result.push(insert_value);
+                                        }
+
+                                        if fork_height == 1 && leaves_bitmap[leaf_index].get_bit(0) {
+                                            proof_result.push(MergeValue::from_h256(value));
+                                        }
+                                    }
+                                },
+                                _ => {
+                                    if !current.is_zero() &&leaves_bitmap[leaf_index].get_bit(i) && !sibling.is_zero() {
+                                        if sibling.is_shortcut() {
+                                            proof_result.push(sibling.into_merge_with_zero::<H>());
+                                        } else {
+                                            proof_result.push(sibling);
+                                        }
+                                    }
+                                }
+                            }
+                            break;
+                        }
+                    }
+                    break;
                 }
             }
 
