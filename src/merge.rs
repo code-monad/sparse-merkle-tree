@@ -95,6 +95,7 @@ impl MergeValue {
     /// When call with MergeValue::Value(v), it would be v
     pub fn base_node<H: Hasher + Default>(&self) -> H256 {
         match self {
+            #[cfg(feature = "trie")]
             MergeValue::ShortCut {
                 key,
                 value,
@@ -115,6 +116,7 @@ impl MergeValue {
 
     /// Helper function for Shortcut node
     /// Transform it into a MergeWithZero node
+    #[cfg(feature = "trie")]
     pub fn into_merge_with_zero<H: Hasher + Default>(&self) -> MergeValue {
         match self {
             MergeValue::ShortCut { key, value, height } => {
