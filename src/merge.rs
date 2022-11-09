@@ -72,20 +72,66 @@ impl MergeValue {
                 hasher.finish()
             }
             #[cfg(feature = "trie")]
-            MergeValue::ShortCut { key, value, height } => {
+            MergeValue::ShortCut {
+                key: _,
+                value,
+                height,
+            } => {
                 // try keep hash same with MergeWithZero
                 if value.is_zero() {
                     return H256::zero();
                 }
+                if *height == 0 {
+                    *value
+                } else {
+                    self.into_merge_with_zero::<H>().hash::<H>()
+                }
+            }
+        }
+    }
+
+    /// Helper function for get base_node
+    /// When call with MergeValue::Value(v), it would be v
+    pub fn base_node<H: Hasher + Default>(&self) -> H256 {
+        match self {
+            MergeValue::ShortCut {
+                key,
+                value,
+                height: _,
+            } => {
+                let base_key = key.parent_path(0);
+                hash_base_node::<H>(0, &base_key, value)
+            }
+            MergeValue::MergeWithZero {
+                base_node,
+                zero_bits: _,
+                zero_count: _,
+            } => *base_node,
+            MergeValue::Value(value) => *value,
+        }
+    }
+
+    /// Helper function for Shortcut node
+    /// Transform it into a MergeWithZero node
+    pub fn into_merge_with_zero<H: Hasher + Default>(&self) -> MergeValue {
+        match self {
+            MergeValue::ShortCut { key, value, height } => {
                 let base_key = key.parent_path(0);
                 let base_node = hash_base_node::<H>(0, &base_key, value);
                 let mut zero_bits = *key;
-                let mut hasher = H::default();
-                hasher.write_byte(MERGE_ZEROS);
-                hasher.write_h256(&base_node);
-                hasher.write_h256(&zero_bits);
-                hasher.write_byte(*height);
-                hasher.finish()
+                for i in *height..=core::u8::MAX {
+                    if key.is_right(i) {
+                        zero_bits.clear_bit(i);
+                    }
+                }
+                MergeValue::MergeWithZero {
+                    base_node,
+                    zero_bits,
+                    zero_count: *height,
+                }
+            }
+            _ => {
+                unreachable!();
             }
         }
     }
@@ -131,7 +177,7 @@ pub fn merge<H: Hasher + Default>(
     MergeValue::Value(hasher.finish())
 }
 
-fn merge_with_zero<H: Hasher + Default>(
+pub fn merge_with_zero<H: Hasher + Default>(
     height: u8,
     node_key: &H256,
     value: &MergeValue,
