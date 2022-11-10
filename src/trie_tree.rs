@@ -143,18 +143,16 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V> + StoreWriteOps<V>>
                                         MergeValue::from_h256(node.hash::<H>()),
                                     )
                                 }
+                            } else if last_height != 0 {
+                                (
+                                    MergeValue::shortcut(key, node.hash::<H>(), last_height),
+                                    MergeValue::shortcut(this_key, value, last_height),
+                                )
                             } else {
-                                if last_height != 0 {
-                                    (
-                                        MergeValue::shortcut(key, node.hash::<H>(), last_height),
-                                        MergeValue::shortcut(this_key, value, last_height),
-                                    )
-                                } else {
-                                    (
-                                        MergeValue::from_h256(node.hash::<H>()),
-                                        MergeValue::from_h256(value),
-                                    )
-                                }
+                                (
+                                    MergeValue::from_h256(node.hash::<H>()),
+                                    MergeValue::from_h256(value),
+                                )
                             };
 
                             let next_branch_key =
@@ -173,7 +171,7 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V> + StoreWriteOps<V>>
                     _ => {
                         if target.is_zero() || last_height == 0 {
                             let insert_value = if last_height == 0 {
-                                node.clone()
+                                node
                             } else {
                                 MergeValue::shortcut(key, node.hash::<H>(), last_height)
                             };
@@ -207,14 +205,14 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V> + StoreWriteOps<V>>
                 self.store
                     .insert_branch(branch_key, BranchNode { left, right })?;
                 break; // stop walking
-            } else {
+            } else
                 if last_height != 0 {
                     last_height -= 1;
                 } else {
                     // do nothing with a zero insertion
                     break;
                 }
-            }
+
         }
 
         for height in last_height..=core::u8::MAX {
