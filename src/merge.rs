@@ -90,7 +90,6 @@ impl MergeValue {
         }
     }
 
-
     /// Helper function for get base_node
     /// When call with MergeValue::Value(v), it would be v
     pub fn base_node<H: Hasher + Default>(&self) -> H256 {
@@ -113,7 +112,6 @@ impl MergeValue {
         }
     }
 
-
     /// Helper function for Shortcut node
     /// Transform it into a MergeWithZero node
     #[cfg(feature = "trie")]
@@ -133,7 +131,7 @@ impl MergeValue {
                     zero_bits,
                     zero_count: *height,
                 }
-            },
+            }
             _ => {
                 unreachable!();
             }

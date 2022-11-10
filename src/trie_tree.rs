@@ -432,11 +432,7 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
                                 };
 
                                 match current {
-                                    MergeValue::ShortCut {
-                                        key,
-                                        value,
-                                        ..
-                                    } => {
+                                    MergeValue::ShortCut { key, value, .. } => {
                                         if !key.eq(&leaf_key) {
                                             let fork_at = key.fork_height(&leaf_key);
                                             if fork_at == height {
@@ -471,8 +467,11 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
 }
 
 /// Helper function for a merkle_path insertion
-fn push_result_maybe_shortcut<H: Hasher + Default>(proof_result: &mut Vec<MergeValue>, value: MergeValue) {
-    if value.is_shortcut(){
+fn push_result_maybe_shortcut<H: Hasher + Default>(
+    proof_result: &mut Vec<MergeValue>,
+    value: MergeValue,
+) {
+    if value.is_shortcut() {
         proof_result.push(value.into_merge_with_zero::<H>())
     } else {
         proof_result.push(value)
