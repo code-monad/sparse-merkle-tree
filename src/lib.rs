@@ -73,7 +73,7 @@ pub mod merkle_proof;
 mod tests;
 pub mod traits;
 pub mod tree;
-#[cfg(smt_impl = "trie")]
+#[cfg(feature = "trie")]
 pub mod trie_tree;
 
 #[cfg(feature = "smtc")]
@@ -83,7 +83,7 @@ pub use merkle_proof::{CompiledMerkleProof, MerkleProof};
 #[cfg(not(feature = "trie"))]
 pub use tree::SparseMerkleTree;
 pub use tree::{BranchKey, BranchNode};
-#[cfg(smt_impl = "trie")]
+#[cfg(feature = "trie")]
 pub use trie_tree::SparseMerkleTree;
 
 /// Expected path size: log2(256) * 2, used for hint vector capacity

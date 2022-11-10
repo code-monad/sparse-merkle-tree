@@ -3,10 +3,6 @@ use crate::{
     blake2b::Blake2bHasher, default_store::DefaultStore, error::Error, merge::MergeValue,
     MerkleProof,
 };
-#[cfg(smt_impl = "trie")]
-pub use trie_tree::SparseMerkleTree;
-#[cfg(not(feature = "trie"))]
-pub use tree::SparseMerkleTree;
 use proptest::prelude::*;
 use rand::prelude::{Rng, SliceRandom};
 use std::collections::HashMap;
