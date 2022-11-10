@@ -205,14 +205,12 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V> + StoreWriteOps<V>>
                 self.store
                     .insert_branch(branch_key, BranchNode { left, right })?;
                 break; // stop walking
-            } else
-                if last_height != 0 {
-                    last_height -= 1;
-                } else {
-                    // do nothing with a zero insertion
-                    break;
-                }
-
+            } else if last_height != 0 {
+                last_height -= 1;
+            } else {
+                // do nothing with a zero insertion
+                break;
+            }
         }
 
         for height in last_height..=core::u8::MAX {
