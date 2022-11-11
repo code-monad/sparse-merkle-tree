@@ -5,13 +5,15 @@
 //! ```
 //! use sparse_merkle_tree::{
 //!     blake2b::Blake2bHasher, default_store::DefaultStore,
-//!     error::Error, MerkleProof,
-//!     SparseMerkleTree, traits::Value, H256
+//!     error::Error, MerkleProof, traits::Value, H256, trie_tree, tree
 //! };
 //! use blake2b_rs::{Blake2b, Blake2bBuilder};
 //!
 //! // define SMT
-//! type SMT = SparseMerkleTree<Blake2bHasher, Word, DefaultStore<Word>>;
+//! #[cfg(feature = "tree")]
+//! type SMT = tree::SparseMerkleTree<Blake2bHasher, Word, DefaultStore<Word>>;
+//! #[cfg(feature = "trie")]
+//! type TRIESMT = trie_tree::SparseMerkleTree<Blake2bHasher, Word, DefaultStore<Word>>;
 //!
 //! // define SMT value
 //! #[derive(Default, Clone)]
@@ -62,6 +64,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 pub mod blake2b;
+pub mod branch;
 #[cfg(feature = "smtc")]
 pub mod ckb_smt;
 pub mod default_store;
@@ -72,18 +75,19 @@ pub mod merkle_proof;
 #[cfg(test)]
 mod tests;
 pub mod traits;
+#[cfg(feature = "tree")]
 pub mod tree;
 #[cfg(feature = "trie")]
 pub mod trie_tree;
 
+pub use branch::{BranchKey, BranchNode};
 #[cfg(feature = "smtc")]
 pub use ckb_smt::{SMTBuilder, SMT};
 pub use h256::H256;
 pub use merkle_proof::{CompiledMerkleProof, MerkleProof};
-#[cfg(not(feature = "trie"))]
+#[cfg(all(not(feature = "trie"), feature = "tree"))]
 pub use tree::SparseMerkleTree;
-pub use tree::{BranchKey, BranchNode};
-#[cfg(feature = "trie")]
+#[cfg(all(not(feature = "tree"), feature = "trie"))]
 pub use trie_tree::SparseMerkleTree;
 
 /// Expected path size: log2(256) * 2, used for hint vector capacity

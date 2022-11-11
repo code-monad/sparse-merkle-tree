@@ -8,7 +8,7 @@ use rand::prelude::{Rng, SliceRandom};
 use std::collections::HashMap;
 
 #[allow(clippy::upper_case_acronyms)]
-type SMT = tree::SparseMerkleTree<Blake2bHasher, H256, DefaultStore<H256>>;
+type SMT = trie_tree::SparseMerkleTree<Blake2bHasher, H256, DefaultStore<H256>>;
 
 #[test]
 fn test_default_root() {

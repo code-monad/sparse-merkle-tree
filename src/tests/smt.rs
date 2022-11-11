@@ -112,7 +112,9 @@ impl Hasher for CkbBlake2bHasher {
     }
 }
 
-pub type CkbSMT = SparseMerkleTree<CkbBlake2bHasher, H256, DefaultStore<H256>>;
+#[cfg(feature = "tree")]
+pub type CkbSMT = tree::SparseMerkleTree<CkbBlake2bHasher, H256, DefaultStore<H256>>;
+#[cfg(feature = "tree")]
 proptest! {
     #[test]
     fn test_random_merkle_proof(key: [u8; 32], value: [u8;32]) {
@@ -121,6 +123,52 @@ proptest! {
         const EXPECTED_PROOF_SIZE: usize = 16;
 
         let mut tree = CkbSMT::default();
+        tree.update(key, value).expect("update");
+        if !tree.is_empty() {
+            let proof = tree.merkle_proof(vec![key]).expect("proof");
+            let compiled_proof = proof
+                .clone()
+                .compile(vec![key])
+                .expect("compile proof");
+            assert!(proof.merkle_path().len() < EXPECTED_PROOF_SIZE);
+            assert!(proof
+                    .verify::<CkbBlake2bHasher>(tree.root(), vec![(key, value)])
+                    .expect("verify"));
+            assert!(compiled_proof
+                    .verify::<CkbBlake2bHasher>(tree.root(), vec![(key, value)])
+                    .expect("compiled verify"));
+
+            let single_compiled_proof = compiled_proof
+                .extract_proof::<CkbBlake2bHasher>(vec![(key, value, true)])
+                .expect("compiled one proof");
+            assert_eq!(compiled_proof.0, single_compiled_proof.0);
+            assert!(single_compiled_proof
+                    .verify::<CkbBlake2bHasher>(tree.root(), vec![(key, value)])
+                    .expect("verify compiled one proof"));
+
+            #[cfg(feature = "smtc")]
+            {
+                let compiled_proof_bin: Vec<u8> = compiled_proof.into();
+                let smt_state = SMTBuilder::new();
+                let smt_state = smt_state.insert(&key, &value).unwrap();
+                let smt = smt_state.build().unwrap();
+                smt.verify(tree.root(), &compiled_proof_bin).expect("verify with c");
+            }
+        }
+    }
+}
+
+#[cfg(feature = "trie")]
+pub type CkbTrieSMT = trie_tree::SparseMerkleTree<CkbBlake2bHasher, H256, DefaultStore<H256>>;
+#[cfg(feature = "trie")]
+proptest! {
+    #[test]
+    fn test_random_merkle_proof_trie(key: [u8; 32], value: [u8;32]) {
+        let key = H256::from(key);
+        let value = H256::from(value);
+        const EXPECTED_PROOF_SIZE: usize = 16;
+
+        let mut tree = CkbTrieSMT::default();
         tree.update(key, value).expect("update");
         if !tree.is_empty() {
             let proof = tree.merkle_proof(vec![key]).expect("proof");

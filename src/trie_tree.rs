@@ -1,9 +1,9 @@
 use crate::{
+    branch::{BranchKey, BranchNode},
     error::{Error, Result},
     merge::{merge, MergeValue},
     merkle_proof::MerkleProof,
     traits::{Hasher, StoreReadOps, StoreWriteOps, Value},
-    tree::{BranchKey, BranchNode},
     vec::Vec,
     H256, MAX_STACK_SIZE,
 };

@@ -17,10 +17,12 @@ include = [
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["std"]
+default = ["std", "tree", "trie"]
 std = []
 # SMT implemented in C
 smtc = []
+# Legacy SMT implementation
+tree = []
 # A storage optimized SMT implemented in trie (https://ouvrard-pierre-alain.medium.com/sparse-merkle-tree-86e6e2fc26da)
 trie = []
 
