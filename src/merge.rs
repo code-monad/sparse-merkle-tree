@@ -74,26 +74,8 @@ impl MergeValue {
                 hasher.finish()
             }
             #[cfg(feature = "trie")]
-            MergeValue::ShortCut {
-                key,
-                value,
-                height,
-            } => {
-                into_merge_with_zero::<H>(*key, *value, *height).hash::<H>()
-            }
-                key,
-                value,
-                height,
-            } => {
-                // try keep hash same with MergeWithZero
-                if value.is_zero() {
-                    return H256::zero();
-                }
-                if *height == 0 {
-                    *value
-                } else {
-                    into_merge_with_zero::<H>(*key, *value, *height).hash::<H>()
-                }
+            MergeValue::ShortCut { key, value, height } => {
+                into_merge_value::<H>(*key, *value, *height).hash::<H>()
             }
         }
     }
@@ -103,8 +85,6 @@ impl MergeValue {
 /// Transform it into a MergeValue or MergeWithZero node
 #[cfg(feature = "trie")]
 pub fn into_merge_value<H: Hasher + Default>(key: H256, value: H256, height: u8) -> MergeValue {
-#[cfg(feature = "trie")]
-pub fn into_merge_with_zero<H: Hasher + Default>(key: H256, value: H256, height: u8) -> MergeValue {
     // try keep hash same with MergeWithZero
     if value.is_zero() {
         MergeValue::from_h256(H256::zero())

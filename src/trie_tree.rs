@@ -1,6 +1,6 @@
 use crate::{
     error::{Error, Result},
-    merge::{merge, into_merge_with_zero, MergeValue},
+    merge::{into_merge_value, merge, MergeValue},
     merkle_proof::MerkleProof,
     traits::{Hasher, StoreReadOps, StoreWriteOps, Value},
     tree::{BranchKey, BranchNode},
@@ -109,28 +109,28 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V> + StoreWriteOps<V>>
                         if this_key.eq(&key) {
                             // we update its value
                             if value_h256.is_zero() && another.is_zero() {
-                                 self.store.remove_branch(&branch_key)?;
-                             } else {
-                                 let target = if value_h256.is_zero() {
-                                     MergeValue::from_h256(value_h256)
-                                 } else {
-                                     MergeValue::shortcut(key, value_h256, h)
-                                 };
-                                 let new_branch = if key.is_right(last_height) {
-                                     BranchNode {
-                                         left: another,
-                                         right: target,
-                                     }
-                                 } else {
-                                     BranchNode {
-                                         left: target,
-                                         right: another,
-                                     }
-                                 };
+                                self.store.remove_branch(&branch_key)?;
+                            } else {
+                                let target = if value_h256.is_zero() {
+                                    MergeValue::from_h256(value_h256)
+                                } else {
+                                    MergeValue::shortcut(key, value_h256, h)
+                                };
+                                let new_branch = if key.is_right(last_height) {
+                                    BranchNode {
+                                        left: another,
+                                        right: target,
+                                    }
+                                } else {
+                                    BranchNode {
+                                        left: target,
+                                        right: another,
+                                    }
+                                };
 
-                                 // update this shortcut's value
+                                // update this shortcut's value
                                 self.store.insert_branch(branch_key, new_branch)?;
-                             }
+                            }
                             break;
                         } else if !value_h256.is_zero() {
                             // we need to move this shortcut down
@@ -394,7 +394,11 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
                                 if leaves_bitmap[leaf_index].get_bit(fork_height)
                                     && heights.contains(&fork_height)
                                 {
-                                    proof_result.push(into_merge_with_zero::<H>(key, value, fork_height))
+                                    proof_result.push(into_merge_value::<H>(
+                                        key,
+                                        value,
+                                        fork_height,
+                                    ))
                                 }
                                 if fork_height == 1 && leaves_bitmap[leaf_index].get_bit(0) {
                                     proof_result.push(MergeValue::from_h256(value));
@@ -422,9 +426,9 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
                                         if !key.eq(&leaf_key) {
                                             let fork_at = key.fork_height(&leaf_key);
                                             if fork_at == height {
-                                                proof_result.push(
-                                                    into_merge_with_zero::<H>(key, value, fork_at)
-                                                );
+                                                proof_result.push(into_merge_value::<H>(
+                                                    key, value, fork_at,
+                                                ));
                                             }
                                         }
                                         break;
@@ -454,11 +458,9 @@ impl<H: Hasher + Default, V: Value, S: StoreReadOps<V>> SparseMerkleTree<H, V, S
 // Helper function for a merkle_path insertion
 fn push_sibling<H: Hasher + Default>(proof_result: &mut Vec<MergeValue>, sibling: MergeValue) {
     match sibling {
-        MergeValue::ShortCut { key, value, height} => {
-            proof_result.push(into_merge_with_zero::<H>(key, value, height))
-        },
-        _ => {
-            proof_result.push(sibling)
+        MergeValue::ShortCut { key, value, height } => {
+            proof_result.push(into_merge_value::<H>(key, value, height))
         }
+        _ => proof_result.push(sibling),
     }
 }
